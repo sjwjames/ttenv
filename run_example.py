@@ -30,11 +30,11 @@ def main():
     np.random.seed(args.seed)
     for _ in range(args.repeat):
         nlogdetcov = []
-        obs, done = env.reset(), False
-        while(not done):
+        obs, terminated,truncated = env.reset(),False,False
+        while(not terminated and not truncated):
             if args.render:
                 env.render()
-            obs, rew, done, info = env.step(env.action_space.sample())
+            obs, rew, terminated, truncated, info = env.step(env.action_space.sample())
             nlogdetcov.append(info['mean_nlogdetcov'])
 
         print("Sum of negative logdet of the target belief covariances : %.2f"%np.sum(nlogdetcov))

@@ -22,7 +22,8 @@ class TargetTrackingBase(gym.Env):
     def __init__(self, num_targets=1, map_name='empty',
                     is_training=True, known_noise=True, **kwargs):
         gym.Env.__init__(self)
-        self.seed()
+        self.render_mode = "human"
+        # self.seed()
         self.state = None
         self.action_space = spaces.Discrete(len(METADATA['action_v']) * \
                                                     len(METADATA['action_w']))
@@ -90,7 +91,7 @@ class TargetTrackingBase(gym.Env):
         # Compute the RL state.
         self.state_func(action_vw, observed)
 
-        return self.state, reward, done, {'mean_nlogdetcov': mean_nlogdetcov, 'std_nlogdetcov': std_nlogdetcov}
+        return self.state, reward, False,False, {'mean_nlogdetcov': mean_nlogdetcov, 'std_nlogdetcov': std_nlogdetcov}
 
     def get_init_pose(self, init_pose_list=[], target_path=[], **kwargs):
         """Generates initial positions for the agent, targets, and target beliefs.
