@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ttenv.metadata import DEVICE
+
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hiddens, num_actions, layer_norm=False):
@@ -183,6 +185,9 @@ class CNNToMLP(nn.Module):
 class ParticleDeepSetMLP(nn.Module):
     def __init__(self, target_dim, agent_dim, output_dim):
         super(ParticleDeepSetMLP, self).__init__()
+        self.target_dim = target_dim
+        self.agent_dim = agent_dim
+        self.output_dim = output_dim
         # agent embedding
         hidden_dim = 10 * target_dim
         # self.agent_embedding = nn.Linear(agent_dim, hidden_dim//3)
@@ -193,7 +198,9 @@ class ParticleDeepSetMLP(nn.Module):
         self.regressor = nn.Sequential(nn.Linear(reg_dim, reg_dim), nn.ReLU(), nn.Linear(reg_dim, reg_dim), nn.ReLU(),
                                        nn.Linear(reg_dim, output_dim))
 
-    def forward(self, target_belief, agent):
+    def forward(self, obs_t):
+        target_belief = torch.stack([s["target"] for s in obs_t])
+        agent = torch.stack([s["agent"] for s in obs_t])
         agent_batch_size, agent_set_size, agent_input_dim = agent.shape
         agent_reshaped = agent.view(-1, agent_input_dim)
         # agent_rep = self.agent_embedding(agent_reshaped)

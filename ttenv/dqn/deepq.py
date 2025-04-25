@@ -58,7 +58,7 @@ class DQNAgent:
         if np.random.random() < epsilon:
             return np.random.randint(self.num_actions)
         
-        observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
+        # observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q_values = self.model(observation)
         return q_values.argmax(dim=1).item()

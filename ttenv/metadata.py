@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 METADATA_v0={
         'version' : 0,
@@ -107,3 +108,11 @@ TTENV_EVAL_MULTI_SET = [
         'const_q':0.02,
         }
 ]
+
+DEVICE = torch.device(
+    "cuda" if torch.cuda.is_available() else
+    "mps" if torch.backends.mps.is_available() else
+    "cpu"
+)
+
+DEVICE = "cpu"

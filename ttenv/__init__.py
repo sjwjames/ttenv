@@ -33,6 +33,8 @@ def make(env_name, render=False, figID=0, record=False, ros=False, directory='',
     local_view = 0
     if env_name == 'TargetTracking-v0':
         env0 = target_tracking.TargetTrackingEnv0(num_targets=num_targets, **kwargs)
+    elif env_name == 'TargetTracking-v0_1':
+        env0 = target_tracking.TargetTrackingEnv0_1(num_targets=num_targets, **kwargs)
     elif env_name == 'TargetTracking-v1':
         env0 = target_tracking.TargetTrackingEnv1(num_targets=num_targets, **kwargs)
     elif env_name == 'TargetTracking-v2':

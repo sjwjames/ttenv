@@ -175,11 +175,13 @@ class ReplayBuffer:
             obses_tp1.append(np.array(obs_tp1, copy=False))
             dones.append(done)
             
-        # Convert to PyTorch tensors
-        obses_t = torch.tensor(np.array(obses_t), dtype=torch.float32, device=self.device)
+        # Convert to PyTorch tensors hacking for now
+        # obses_t = torch.tensor(np.array(obses_t), dtype=torch.float32, device=self.device)
+        obses_t = np.array(obses_t).squeeze()
         actions = torch.tensor(np.array(actions), dtype=torch.int64, device=self.device)
         rewards = torch.tensor(np.array(rewards), dtype=torch.float32, device=self.device)
-        obses_tp1 = torch.tensor(np.array(obses_tp1), dtype=torch.float32, device=self.device)
+        obses_tp1 = np.array(obses_tp1).squeeze()
+        # obses_tp1 = torch.tensor(np.array(obses_tp1), dtype=torch.float32, device=self.device)
         dones = torch.tensor(np.array(dones), dtype=torch.float32, device=self.device)
         
         return obses_t, actions, rewards, obses_tp1, dones
