@@ -2,6 +2,7 @@ import numpy as np
 import random
 import torch
 
+
 # We'll implement the segment tree directly here to avoid dependencies
 class SegmentTree:
     def __init__(self, capacity, operation, neutral_element):
@@ -23,7 +24,7 @@ class SegmentTree:
         self._capacity = capacity
         self._value = [neutral_element for _ in range(2 * capacity)]
         self._operation = operation
-        
+
     def _reduce_helper(self, start, end, node, node_start, node_end):
         if start == node_start and end == node_end:
             return self._value[node]
@@ -38,7 +39,7 @@ class SegmentTree:
                     self._reduce_helper(start, mid, 2 * node, node_start, mid),
                     self._reduce_helper(mid + 1, end, 2 * node + 1, mid + 1, node_end)
                 )
-    
+
     def reduce(self, start=0, end=None):
         """Returns result of applying operation to the range [start, end)"""
         if end is None:
@@ -47,7 +48,7 @@ class SegmentTree:
             end += self._capacity
         end -= 1
         return self._reduce_helper(start, end, 1, 0, self._capacity - 1)
-    
+
     def __setitem__(self, idx, val):
         # index of the leaf
         idx += self._capacity
@@ -59,7 +60,7 @@ class SegmentTree:
                 self._value[2 * idx + 1]
             )
             idx //= 2
-    
+
     def __getitem__(self, idx):
         assert 0 <= idx < self._capacity
         return self._value[self._capacity + idx]
@@ -72,11 +73,11 @@ class SumSegmentTree(SegmentTree):
             operation=lambda a, b: a + b,
             neutral_element=0.0
         )
-        
+
     def sum(self, start=0, end=None):
         """Returns the sum in the range [start, end)"""
         return self.reduce(start, end)
-        
+
     def find_prefixsum_idx(self, prefixsum):
         """Find the highest index `i` in the array such that
             sum(arr[0] + arr[1] + ... + arr[i - i]) <= prefixsum
@@ -113,7 +114,7 @@ class MinSegmentTree(SegmentTree):
             operation=min,
             neutral_element=float('inf')
         )
-        
+
     def min(self, start=0, end=None):
         """Returns min(arr[start], ..., arr[end])"""
         return self.reduce(start, end)
@@ -174,16 +175,16 @@ class ReplayBuffer:
             rewards.append(reward)
             obses_tp1.append(np.array(obs_tp1, copy=False))
             dones.append(done)
-            
+
         # Convert to PyTorch tensors hacking for now
-        # obses_t = torch.tensor(np.array(obses_t), dtype=torch.float32, device=self.device)
-        obses_t = np.array(obses_t).squeeze()
+        obses_t = torch.tensor(np.array(obses_t), dtype=torch.float32, device=self.device)
+        # obses_t = np.array(obses_t).squeeze()
         actions = torch.tensor(np.array(actions), dtype=torch.int64, device=self.device)
         rewards = torch.tensor(np.array(rewards), dtype=torch.float32, device=self.device)
-        obses_tp1 = np.array(obses_tp1).squeeze()
-        # obses_tp1 = torch.tensor(np.array(obses_tp1), dtype=torch.float32, device=self.device)
+        # obses_tp1 = np.array(obses_tp1).squeeze()
+        obses_tp1 = torch.tensor(np.array(obses_tp1), dtype=torch.float32, device=self.device)
         dones = torch.tensor(np.array(dones), dtype=torch.float32, device=self.device)
-        
+
         return obses_t, actions, rewards, obses_tp1, dones
 
     def sample(self, batch_size):
@@ -306,11 +307,11 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             p_sample = self._it_sum[idx] / self._it_sum.sum()
             weight = (p_sample * len(self._storage)) ** (-beta)
             weights.append(weight / max_weight)
-            
+
         # Convert to PyTorch tensors
         weights = torch.tensor(np.array(weights), dtype=torch.float32, device=self.device)
         encoded_sample = self._encode_sample(idxes)
-        
+
         return tuple(list(encoded_sample) + [weights, np.array(idxes)])
 
     def update_priorities(self, idxes, priorities):
@@ -336,3 +337,99 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             self._it_min[idx] = priority ** self._alpha
 
             self._max_priority = max(self._max_priority, priority)
+
+
+class ParticleBeliefReplayBuffer(ReplayBuffer):
+    def __init__(self, size, device='cpu'):
+        """Create Replay buffer.
+
+        Parameters
+        ----------
+        size: int
+            Max number of transitions to store in the buffer. When the buffer
+            overflows the old memories are dropped.
+        device: str
+            PyTorch device to store tensors on
+        """
+        super().__init__(size, device)
+        self._storage = []
+        self._maxsize = size
+        self._next_idx = 0
+        self.device = device
+
+    def __len__(self):
+        return len(self._storage)
+
+    def add(self, target_belief_t, agent_info_t, action, reward, target_belief_t1, agent_info_t1, done):
+        """Add a new experience to the buffer.
+
+        Parameters
+        ----------
+        target_belief_t/1: numpy.ndarray
+            particle beliefs
+        agent_info_t/1: numpy.ndarray
+            agent state and observed obstacle info
+        action: int or float or numpy.ndarray
+            Action taken
+        reward: float
+            Reward received
+        done: bool
+            Whether the episode ended after this transition
+        """
+        data = (target_belief_t, agent_info_t, action, reward, target_belief_t1, agent_info_t1, done)
+
+        if self._next_idx >= len(self._storage):
+            self._storage.append(data)
+        else:
+            self._storage[self._next_idx] = data
+        self._next_idx = (self._next_idx + 1) % self._maxsize
+
+    def _encode_sample(self, idxes):
+        """Convert samples to pytorch tensors."""
+        actions, rewards, dones = [], [], []
+        target_beliefs_t=torch.tensor([], dtype=torch.float32, device=self.device)
+        agent_infos_t = torch.tensor([], dtype=torch.float32, device=self.device)
+        target_beliefs_t1 = torch.tensor([], dtype=torch.float32, device=self.device)
+        agent_infos_t1 = torch.tensor([], dtype=torch.float32, device=self.device)
+        for i in idxes:
+            data = self._storage[i]
+            target_belief_t, agent_info_t, action, reward, target_belief_t1, agent_info_t1, done = data
+            target_beliefs_t=torch.cat((target_beliefs_t,target_belief_t),dim=0)
+            agent_infos_t=torch.cat((agent_infos_t,agent_info_t),dim=0)
+            actions.append(np.array(action, copy=False))
+            rewards.append(reward)
+            target_beliefs_t1=torch.cat((target_beliefs_t1, target_belief_t1),dim=0)
+            agent_infos_t1=torch.cat((agent_infos_t1, agent_info_t1),dim=0)
+            dones.append(done)
+
+        # Convert to PyTorch tensors hacking for now
+        actions = torch.tensor(np.array(actions), dtype=torch.int64, device=self.device)
+        rewards = torch.tensor(np.array(rewards), dtype=torch.float32, device=self.device)
+        dones = torch.tensor(np.array(dones), dtype=torch.float32, device=self.device)
+
+        return target_beliefs_t, agent_infos_t, actions, rewards, target_beliefs_t1, agent_infos_t1, dones
+
+    def sample(self, batch_size):
+        """Sample a batch of experiences.
+
+        Parameters
+        ----------
+        batch_size: int
+            How many transitions to sample.
+
+        Returns
+        -------
+        obs_batch: torch.Tensor
+            batch of observations
+        act_batch: torch.Tensor
+            batch of actions executed given obs_batch
+        rew_batch: torch.Tensor
+            rewards received as results of executing act_batch
+        next_obs_batch: torch.Tensor
+            next set of observations seen after executing act_batch
+        done_mask: torch.Tensor
+            done_mask[i] = 1.0 if executing act_batch[i] resulted in
+            the end of an episode and 0 otherwise.
+        """
+        idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
+        return self._encode_sample(idxes)

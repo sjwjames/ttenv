@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from collections import deque
 
-from replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, ParticleBeliefReplayBuffer
 from utils import save_state, load_state
 
 
@@ -36,7 +36,7 @@ class DQNAgent:
         self.model = model.to(device)
         self.target_model = target_model.to(device)
         self.num_actions = num_actions
-        
+
         # Copy weights from model to target_model
         self.update_target_network(1.0)
 
@@ -57,12 +57,12 @@ class DQNAgent:
         """
         if np.random.random() < epsilon:
             return np.random.randint(self.num_actions)
-        
-        # observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
+
+        observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q_values = self.model(observation)
         return q_values.argmax(dim=1).item()
-    
+
     def compute_td_error(self, obs_t, action, reward, obs_tp1, done, gamma):
         """Compute TD-error for a single transition.
         
@@ -91,7 +91,7 @@ class DQNAgent:
         action = torch.tensor([action], dtype=torch.int64).to(self.device)
         reward = torch.tensor([reward], dtype=torch.float32).to(self.device)
         done = torch.tensor([done], dtype=torch.float32).to(self.device)
-        
+
         with torch.no_grad():
             q_tp1 = self.target_model(obs_tp1)
             q_t_selected = self.model(obs_t).gather(1, action.unsqueeze(1)).squeeze()
@@ -99,12 +99,114 @@ class DQNAgent:
             q_tp1_best = (1.0 - done) * q_tp1_best
             target = reward + gamma * q_tp1_best
             td_error = target - q_t_selected
-        
+
         return td_error.abs().item()
-    
+
     def update_target_network(self, tau=1.0):
         """Update target network by copying from model.
         
+        Parameters
+        ----------
+        tau: float
+            Interpolation parameter - if 1.0, target is set equal to model
+        """
+        if tau == 1.0:
+            self.target_model.load_state_dict(self.model.state_dict())
+        else:
+            for target_param, param in zip(self.target_model.parameters(), self.model.parameters()):
+                target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+
+
+class PFDQNAgent:
+    def __init__(self, model, target_model, num_actions, device='cpu'):
+        """Initialize Deep Q-Network agent.
+
+        Parameters
+        ----------
+        model: torch.nn.Module
+            The Q-Network model
+        target_model: torch.nn.Module
+            The target Q-Network model
+        num_actions: int
+            Number of possible actions
+        device: str
+            PyTorch device to use ('cpu' or 'cuda')
+        """
+        self.device = device
+        self.model = model.to(device)
+        self.target_model = target_model.to(device)
+        self.num_actions = num_actions
+
+        # Copy weights from model to target_model
+        self.update_target_network(1.0)
+
+    def act(self, observations, epsilon=0.0):
+        """Select an action based on current observation using epsilon-greedy policy.
+
+        Parameters
+        ----------
+        observation: numpy.ndarray
+            Current observation
+        epsilon: float
+            Random action probability
+
+        Returns
+        -------
+        action: int
+            Selected action
+        """
+        if np.random.random() < epsilon:
+            return np.random.randint(self.num_actions)
+        target_belief = observations["target"]
+        agent_info = observations["agent"]
+        with torch.no_grad():
+            q_values = self.model(target_belief, agent_info)
+        return q_values.argmax(dim=1).item()
+
+    def compute_td_error(self, target_bf_t, agent_info_t, action, reward, target_bf_t1, agent_info_t1, done, gamma):
+        """Compute TD-error for a single transition.
+
+        Parameters
+        ----------
+        target_bf_t: numpy.ndarray
+            Current belief state
+        agent_info_t:numpy.ndarray
+            Current agent info
+        action: int
+            Action taken
+        reward: float
+            Reward received
+        target_bf_t1: numpy.ndarray
+            Next belief state
+        agent_info_t1:numpy.ndarray
+            Next agent info
+        done: bool
+            Whether the episode is done
+        gamma: float
+            Discount factor
+
+        Returns
+        -------
+        td_error: float
+            TD-error for the transition
+        """
+        action = torch.tensor([action], dtype=torch.int64).to(self.device)
+        reward = torch.tensor([reward], dtype=torch.float32).to(self.device)
+        done = torch.tensor([done], dtype=torch.float32).to(self.device)
+
+        with torch.no_grad():
+            q_tp1 = self.target_model(target_bf_t1, agent_info_t1)
+            q_t_selected = self.model(target_bf_t, agent_info_t).gather(1, action.unsqueeze(1)).squeeze()
+            q_tp1_best = q_tp1.max(1)[0]
+            q_tp1_best = (1.0 - done) * q_tp1_best
+            target = reward + gamma * q_tp1_best
+            td_error = target - q_t_selected
+
+        return td_error.abs().item()
+
+    def update_target_network(self, tau=1.0):
+        """Update target network by copying from model.
+
         Parameters
         ----------
         tau: float
@@ -130,7 +232,7 @@ class ActWrapper:
         """
         self._agent = agent
         self._act_params = act_params
-    
+
     def __call__(self, observation, stochastic=True, update_eps=-1):
         """Select an action based on the observation.
         
@@ -150,9 +252,9 @@ class ActWrapper:
         """
         epsilon = self._act_params.get('epsilon', 0.1) if update_eps < 0 else update_eps
         return self._agent.act(observation, epsilon=epsilon * stochastic)
-    
+
     @staticmethod
-    def load(path, act_params_new=None):
+    def load(path, act_params_new=None, **kwargs):
         """Load agent from file.
         
         Parameters
@@ -169,29 +271,32 @@ class ActWrapper:
         """
         with open(path, "rb") as f:
             model_data, act_params = cloudpickle.load(f)
-        
+
         if act_params_new:
             for (k, v) in act_params_new.items():
                 act_params[k] = v
-        
+
         device = act_params.get('device', 'cpu')
         model = act_params['q_func'](act_params['num_actions']).to(device)
         target_model = act_params['q_func'](act_params['num_actions']).to(device)
-        agent = DQNAgent(model, target_model, act_params['num_actions'], device)
-        
+        if act_params["particle_belief"]:
+            agent = PFDQNAgent(model, target_model, act_params['num_actions'], device)
+        else:
+            agent = DQNAgent(model, target_model, act_params['num_actions'], device)
+
         with tempfile.TemporaryDirectory() as td:
             arc_path = os.path.join(td, "packed.zip")
             with open(arc_path, "wb") as f:
                 f.write(model_data)
-            
+
             zipfile.ZipFile(arc_path, 'r', zipfile.ZIP_DEFLATED).extractall(td)
-            
+
             state_dict = torch.load(os.path.join(td, "model"), map_location=device)
             model.load_state_dict(state_dict['model_state_dict'])
             target_model.load_state_dict(state_dict['target_state_dict'])
-        
+
         return ActWrapper(agent, act_params)
-    
+
     def save(self, path=None):
         """Save agent to a file.
         
@@ -202,14 +307,14 @@ class ActWrapper:
         """
         if path is None:
             path = os.path.join(os.getcwd(), "model.pkl")
-        
+
         with tempfile.TemporaryDirectory() as td:
             save_path = os.path.join(td, "model")
             torch.save({
                 'model_state_dict': self._agent.model.state_dict(),
                 'target_state_dict': self._agent.target_model.state_dict()
             }, save_path)
-            
+
             arc_name = os.path.join(td, "packed.zip")
             with zipfile.ZipFile(arc_name, 'w') as zipf:
                 for root, dirs, files in os.walk(td):
@@ -217,10 +322,10 @@ class ActWrapper:
                         file_path = os.path.join(root, file)
                         if file_path != arc_name:
                             zipf.write(file_path, os.path.relpath(file_path, td))
-            
+
             with open(arc_name, "rb") as f:
                 model_data = f.read()
-        
+
         with open(path, "wb") as f:
             cloudpickle.dump((model_data, self._act_params), f)
 
@@ -274,7 +379,8 @@ def learn(env,
           test_eps=0.05,
           gpu_memory=1.0,
           render=False,
-          device='cuda' if torch.cuda.is_available() else 'cpu'):
+          device='cuda' if torch.cuda.is_available() else 'cpu',
+          particle_belief=False):
     """Train a Deep Q-Network model.
     
     Parameters
@@ -343,7 +449,8 @@ def learn(env,
         Whether to render the environment
     device: str
         PyTorch device to use
-    
+    particle_belief: bool
+        If using particle belief
     Returns
     -------
     act: ActWrapper
@@ -351,80 +458,94 @@ def learn(env,
     """
     # Create optimizers
     observation_shape = env.observation_space.shape
-    
+
     # Create target model
     model = q_func(env.action_space.n).to(device)
     target_model = q_func(env.action_space.n).to(device)
-    
-    agent = DQNAgent(model, target_model, env.action_space.n, device)
-    
-    # Create replay buffer
-    if prioritized_replay:
-        replay_buffer = PrioritizedReplayBuffer(buffer_size, prioritized_replay_alpha, device=device)
-        if prioritized_replay_beta_iters is None:
-            prioritized_replay_beta_iters = max_timesteps
-        beta_schedule = np.linspace(prioritized_replay_beta0, 1.0, prioritized_replay_beta_iters)
+    if particle_belief:
+        agent = PFDQNAgent(model, target_model, env.action_space.n, device)
+        replay_buffer = ParticleBeliefReplayBuffer(buffer_size, device=device)
     else:
-        replay_buffer = ReplayBuffer(buffer_size, device=device)
-        beta_schedule = None
-    
+        agent = DQNAgent(model, target_model, env.action_space.n, device)
+
+        # Create replay buffer
+        if prioritized_replay:
+            replay_buffer = PrioritizedReplayBuffer(buffer_size, prioritized_replay_alpha, device=device)
+            if prioritized_replay_beta_iters is None:
+                prioritized_replay_beta_iters = max_timesteps
+            beta_schedule = np.linspace(prioritized_replay_beta0, 1.0, prioritized_replay_beta_iters)
+        else:
+            replay_buffer = ReplayBuffer(buffer_size, device=device)
+            beta_schedule = None
+
     # Create optimizer
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    
+
     # Initialize variables
     num_episodes = 0
     episode_rewards = deque(maxlen=100)
     saved_mean_reward = -math.inf
-    
+
     # Function to train the model
     def train():
         nonlocal saved_mean_reward
-        
+
         if len(replay_buffer) < batch_size:
             return 0
-        
-        # Sample from replay buffer
-        if prioritized_replay:
-            beta = beta_schedule[min(t, prioritized_replay_beta_iters - 1)]
-            batch = replay_buffer.sample(batch_size, beta)
-            obses_t, actions, rewards, obses_tp1, dones, weights, batch_idxes = batch
-        else:
+        if particle_belief:
             batch = replay_buffer.sample(batch_size)
-            obses_t, actions, rewards, obses_tp1, dones = batch
-            weights, batch_idxes = torch.tensor(np.ones_like(rewards.cpu()),device=device,dtype=torch.float32), None
-        
+            target_bfs_t, agent_info_t, actions, rewards, target_bfs_t1, agent_info_t1, dones = batch
+            weights, batch_idxes = torch.tensor(np.ones_like(rewards.cpu()), device=device, dtype=torch.float32), None
+            q_t = model(target_bfs_t, agent_info_t)
+        else:
+            # Sample from replay buffer
+            if prioritized_replay:
+                beta = beta_schedule[min(t, prioritized_replay_beta_iters - 1)]
+                batch = replay_buffer.sample(batch_size, beta)
+                obses_t, actions, rewards, obses_tp1, dones, weights, batch_idxes = batch
+            else:
+                batch = replay_buffer.sample(batch_size)
+                obses_t, actions, rewards, obses_tp1, dones = batch
+                weights, batch_idxes = torch.tensor(np.ones_like(rewards.cpu()), device=device,
+                                                    dtype=torch.float32), None
+            q_t = model(obses_t)
         # Compute current Q-values
-        q_t = model(obses_t)
         q_t_selected = q_t.gather(1, actions.unsqueeze(1)).squeeze(1)
-        
+
         # Compute next Q-values using target network
         with torch.no_grad():
             if double_q:
                 # Double Q-learning: Select actions using the main network
-                q_tp1 = model(obses_tp1)
+                if particle_belief:
+                    q_tp1 = model(target_bfs_t1, agent_info_t1)
+                else:
+                    q_tp1 = model(obses_tp1)
                 _, a_tp1 = q_tp1.max(dim=1)
-                
+
                 # Evaluate those actions using the target network
                 q_tp1_target = target_model(obses_tp1)
                 q_tp1_best = q_tp1_target.gather(1, a_tp1.unsqueeze(1)).squeeze(1)
             else:
                 # Standard DQN: Select best actions using the target network
-                q_tp1 = target_model(obses_tp1)
+                if particle_belief:
+                    q_tp1 = model(target_bfs_t1, agent_info_t1)
+                else:
+                    q_tp1 = model(obses_tp1)
                 q_tp1_best = q_tp1.max(1)[0]
-            
+
             # Zero out Q-values for terminal states
             q_tp1_best = q_tp1_best * (1.0 - dones)
-            
+
             # Compute the TD target
             td_target = rewards + gamma * q_tp1_best
-        
+
         # Compute Huber loss
         td_error = q_t_selected - td_target
         loss = F.smooth_l1_loss(q_t_selected, td_target, reduction='none')
-        
+
         # Apply importance weights from prioritized replay
         weighted_loss = torch.mean(loss * weights)
-        
+
         # Optimize the model
         optimizer.zero_grad()
         weighted_loss.backward()
@@ -432,7 +553,7 @@ def learn(env,
         for param in model.parameters():
             param.grad.data.clamp_(-1, 1)
         optimizer.step()
-        
+
         # Update target network if it's time
         if target_network_update_freq < 1:
             # Soft target update
@@ -441,29 +562,30 @@ def learn(env,
             # Hard target update
             if t % target_network_update_freq == 0:
                 agent.update_target_network()
-        
+
         # Update priorities in prioritized replay buffer
         if prioritized_replay:
             new_priorities = np.abs(td_error.detach().cpu().numpy()) + prioritized_replay_eps
             replay_buffer.update_priorities(batch_idxes, new_priorities)
-        
+
         return (loss * weights).mean().item()
-    
+
     # Create the schedule for exploration
     exploration = np.linspace(1.0, exploration_final_eps, int(exploration_fraction * max_timesteps))
-    
+
     # Initialize the parameters and copy them to the target network
     agent.update_target_network()
-    
+
     # Create action function
     act_params = {
         'epsilon': exploration_final_eps,
         'q_func': q_func,
         'num_actions': env.action_space.n,
-        'device': device
+        'device': device,
+        'particle_belief': particle_belief
     }
     act = ActWrapper(agent, act_params)
-    
+
     # Initialization variables
     obs = env.reset()
     episode_reward = 0
@@ -471,47 +593,51 @@ def learn(env,
     loss = 0
     t = 0
     episode_rewards_history = []
-    
+
     # Main training loop
     for t in range(max_timesteps):
         # Select action
         action = act(obs, stochastic=True, update_eps=exploration[min(t, len(exploration) - 1)])
-        
+
         # Execute action and observe next state
         next_obs, reward, terminated, truncated, info = env.step(action)
 
         done = terminated or truncated
         # Store transition in the replay buffer
-        replay_buffer.add(obs, action, reward, next_obs, float(done))
-        
+        if particle_belief:
+            replay_buffer.add(obs["target"], obs["agent"], action, reward, next_obs["target"], next_obs["agent"],
+                              float(done))
+        else:
+            replay_buffer.add(obs, action, reward, next_obs, float(done))
+
         # Update statistics
         episode_reward += reward
         episode_step += 1
-        
+
         # Train the network
         if t > learning_starts and t % train_freq == 0:
             loss = train()
-        
+
         # Update observation
         obs = next_obs
-        
+
         # End of episode
         if done:
             # Update episode statistics
             num_episodes += 1
             episode_rewards.append(episode_reward)
             episode_rewards_history.append(episode_reward)
-            
+
             # Reset environment
             obs = env.reset()
             episode_reward = 0
             episode_step = 0
-        
+
         # Evaluate and save model
         if t > learning_starts and checkpoint_freq is not None and t % checkpoint_freq == 0:
             # Compute mean reward
             mean_100ep_reward = np.mean(episode_rewards)
-            
+
             # Print progress
             if print_freq is not None and len(episode_rewards) > 1 and t % print_freq == 0:
                 print(f"Steps: {t}")
@@ -519,17 +645,18 @@ def learn(env,
                 print(f"Mean 100 episode reward: {mean_100ep_reward:.2f}")
                 print(f"% time spent exploring: {int(100 * exploration[min(t, len(exploration) - 1)])}")
                 print(f"Learning rate: {lr:.5f}")
-            
+
             # Save best model
             if checkpoint_path is not None:
                 if mean_100ep_reward > saved_mean_reward:
-                    print(f"Saving model due to mean reward increase: {saved_mean_reward:.2f} -> {mean_100ep_reward:.2f}")
+                    print(
+                        f"Saving model due to mean reward increase: {saved_mean_reward:.2f} -> {mean_100ep_reward:.2f}")
                     act.save(checkpoint_path)
                     saved_mean_reward = mean_100ep_reward
-        
+
         # Call callback if provided
         if callback is not None:
             if callback(locals(), globals()):
                 break
-    
+
     return act

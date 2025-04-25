@@ -48,7 +48,7 @@ class Display2D(Wrapper):
             self.traj_y[i][1].append(target_true_pos[i][1])
         return self.env.step(action)
 
-    def render(self, record=False, batch_outputs=None):
+    def render(self, record=False, batch_outputs=None,**kwargs):
         state = self.env_core.agent.state
         num_targets = len(self.traj_y)
         if type(self.env_core.targets) == list:
@@ -178,7 +178,10 @@ class Display2D(Wrapper):
             if not record:
                 # plt.draw()
                 # plt.pause(0.0001)
-                plt.savefig("test"+str(self.n_frames)+".png")
+                if "log_dir" in kwargs:
+                    plt.savefig(kwargs["log_dir"]+"test"+str(self.n_frames)+".png")
+                else:
+                    plt.savefig("test" + str(self.n_frames) + ".png")
 
         self.n_frames += 1
 

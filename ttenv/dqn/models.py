@@ -198,9 +198,7 @@ class ParticleDeepSetMLP(nn.Module):
         self.regressor = nn.Sequential(nn.Linear(reg_dim, reg_dim), nn.ReLU(), nn.Linear(reg_dim, reg_dim), nn.ReLU(),
                                        nn.Linear(reg_dim, output_dim))
 
-    def forward(self, obs_t):
-        target_belief = torch.stack([s["target"] for s in obs_t])
-        agent = torch.stack([s["agent"] for s in obs_t])
+    def forward(self, target_belief,agent):
         agent_batch_size, agent_set_size, agent_input_dim = agent.shape
         agent_reshaped = agent.view(-1, agent_input_dim)
         # agent_rep = self.agent_embedding(agent_reshaped)

@@ -230,8 +230,8 @@ class TargetTrackingEnv0_1(TargetTrackingBase):
             observed_list.append(float(observed[i]))
         observed_list = np.concatenate((observed_list, self.agent.state))
         observed_list = np.concatenate((observed_list, obstacles_pt))
-        self.state = [{"target": torch.tensor(np.array(particle_list), dtype=torch.float32, device=DEVICE),
-                       "agent": torch.tensor(observed_list, dtype=torch.float32, device=DEVICE).unsqueeze(0)}]
+        self.state = {"target": torch.tensor(np.array(particle_list), dtype=torch.float32, device=DEVICE).unsqueeze(0),
+                       "agent": torch.tensor(np.array([observed_list]), dtype=torch.float32, device=DEVICE).unsqueeze(0)}
 
         # Update the visit map for the evaluation purpose.
         if self.MAP.visit_map is not None:
@@ -281,15 +281,15 @@ class TargetTrackingEnv0_1(TargetTrackingBase):
 
         self.belief_targets = [
             PFbelief(dim=self.target_dim, limit=self.limit['target'], transition_func=self.target_transition,
-                     prior_dist=self.prior_dist, n=self.n_particles, effective_n=self.n_particles / 2, dim_z=2,
+                     prior_dist=self.prior_dist, n=self.n_particles, effective_n=self.n_particles //5, dim_z=2,
                      obs_noise_func=self.observation_noise,
                      collision_func=lambda x: self.MAP.is_collision(x))
             for _ in range(self.num_targets)]
 
     # modify for other reward, e.g., GMM MI estimation/NMC
     def get_reward(self, is_training=True, **kwargs):
-        reward = -np.sum([np.linalg.norm(np.array(bf.state[:2])-np.array(self.agent.state[:2])) for bf in self.belief_targets])
-        return reward, False, None, None
+        reward = -np.sum([bf.entropy() for bf in self.belief_targets])
+        return reward, False, 0, 0
 
 
 class TargetTrackingEnv1(TargetTrackingBase):

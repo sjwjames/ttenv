@@ -52,6 +52,7 @@ parser.add_argument('--init_file_path', type=str, default=".")
 parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 parser.add_argument('--num_particles', type=int, default=1000)
 parser.add_argument('--im_size', type=int, default=28)
+parser.add_argument('--particle_belief', type=bool, default=False)
 
 args = parser.parse_args()
 
@@ -75,17 +76,19 @@ def train(seed, save_dir):
                      im_size=args.im_size,
                      )
 
-    # # Parse hidden layer sizes from string
-    # hiddens = [int(h) for h in args.hiddens.split(':')]
-    #
-    # # Create MLP model
-    # model_fn = get_mlp_model(
-    #     input_dim=env.observation_space.shape[0],
-    #     hiddens=hiddens
-    # )
+    if not args.particle_belief:
+        # # Parse hidden layer sizes from string
+        hiddens = [int(h) for h in args.hiddens.split(':')]
 
-    # 1 for particle weight, 2 for obstacle info, observed info per target
-    model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets, env.env.agent.dim + 2 + args.nb_targets)
+        # Create MLP model
+        model_fn = get_mlp_model(
+            input_dim=env.observation_space.shape[0],
+            hiddens=hiddens
+        )
+    else:
+        # 1 for particle weight, 2 for obstacle info, observed info per target
+        model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
+                                        env.env.agent.dim + 2 + args.nb_targets)
 
     act = learn(
         env,
@@ -124,6 +127,7 @@ def train(seed, save_dir):
         gpu_memory=args.gpu_memory,
         render=(bool(args.render) or bool(args.ros)),
         device=args.device,
+        particle_belief=args.particle_belief
     )
 
     print("Saving model to model.pkl")
@@ -151,7 +155,7 @@ def test():
         timelimit_env = timelimit_env.env
 
     # Load the model
-    act = load(os.path.join(args.log_dir, args.log_fname))
+    act = load(os.path.join(args.log_dir, args.log_fname), {"particle_belief": args.particle_belief})
 
     # if args.ros_log:
     #     from ttenv.target_tracking.ros_wrapper import RosLog
@@ -171,7 +175,7 @@ def test():
     while (ep < args.nb_test_steps):  # test episode
         ep += 1
         episode_rew, nlogdetcov = 0, 0
-        if args.env=="TargetTracking-v0_1":
+        if args.particle_belief:
             obs, terminated, truncated = env.reset(), False, False
             test_init_pose.append({'agent': timelimit_env.env.agent.state,
                                    'targets': [timelimit_env.env.targets[i].state for i in range(args.nb_targets)],
@@ -187,14 +191,14 @@ def test():
 
         while not terminated and not truncated:
             if args.render:
-                env.render()
+                env.render(log_dir=args.log_dir)
             # if args.ros_log:
             #     ros_log.log(env)
 
             obs, rew, terminated, truncated, info = env.step(act(obs))
 
             episode_rew += rew
-            # nlogdetcov += info['mean_nlogdetcov']
+            nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
 
         time_elapsed.append(time.time() - s_time)
         ep_nlogdetcov.append(nlogdetcov)
