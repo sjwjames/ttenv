@@ -23,12 +23,11 @@ def make(env_name, render=False, figID=0, record=False, ros=False, directory='',
     num_targets : int
         the number of targets
     """
-    # if T_steps is None:
-    #     if num_targets > 1:
-    #         T_steps = 150
-    #     else:
-    #         T_steps = 100
-    T_steps = 100
+    if T_steps is None:
+        if num_targets > 1:
+            T_steps = 150
+        else:
+            T_steps = 100
 
     local_view = 0
     if env_name == 'TargetTracking-v0':
@@ -37,6 +36,8 @@ def make(env_name, render=False, figID=0, record=False, ros=False, directory='',
         env0 = target_tracking.TargetTrackingEnv0_1(num_targets=num_targets, **kwargs)
     elif env_name == 'TargetTracking-v1':
         env0 = target_tracking.TargetTrackingEnv1(num_targets=num_targets, **kwargs)
+    elif env_name == 'TargetTracking-v1_1':
+        env0 = target_tracking.TargetTrackingEnv1_1(num_targets=num_targets, **kwargs)
     elif env_name == 'TargetTracking-v2':
         env0 = target_tracking.TargetTrackingEnv2(num_targets=num_targets, **kwargs)
     elif env_name == 'TargetTracking-v3':

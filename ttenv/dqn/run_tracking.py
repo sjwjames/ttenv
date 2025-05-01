@@ -28,6 +28,7 @@ parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--nb_warmup_steps', type=int, default=100)
 parser.add_argument('--nb_epoch_steps', type=int, default=100)
 parser.add_argument('--target_update_freq', type=float, default=50)  # This should be smaller than epoch_steps
+parser.add_argument('--checkpoint_freq', type=int, default=1000)
 parser.add_argument('--nb_test_steps', type=int, default=10)
 parser.add_argument('--learning_rate', type=float, default=0.001)
 parser.add_argument('--learning_rate_decay_factor', type=float, default=1.0)
@@ -52,8 +53,8 @@ parser.add_argument('--init_file_path', type=str, default=".")
 parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 parser.add_argument('--num_particles', type=int, default=1000)
 parser.add_argument('--im_size', type=int, default=28)
-parser.add_argument('--particle_belief', type=bool, default=False)
-
+parser.add_argument('--particle_belief', type=int, default=0)
+parser.add_argument('--reuse_last_init', type=int, default=0)
 args = parser.parse_args()
 
 
@@ -74,6 +75,7 @@ def train(seed, save_dir):
                      num_targets=args.nb_targets,
                      is_training=True,
                      im_size=args.im_size,
+                     T_steps=args.nb_epoch_steps
                      )
 
     if not args.particle_belief:
@@ -103,7 +105,7 @@ def train(seed, save_dir):
         exploration_final_eps=args.eps_min,
         target_network_update_freq=args.target_update_freq,
         print_freq=10,
-        checkpoint_freq=int(args.nb_train_steps / 10),
+        checkpoint_freq=args.checkpoint_freq,
         checkpoint_path=os.path.join(save_dir_0, "model.pkl"),
         learning_starts=args.nb_warmup_steps,
         gamma=args.gamma,
@@ -127,7 +129,8 @@ def train(seed, save_dir):
         gpu_memory=args.gpu_memory,
         render=(bool(args.render) or bool(args.ros)),
         device=args.device,
-        particle_belief=args.particle_belief
+        particle_belief=args.particle_belief,
+        reuse_last_init=args.reuse_last_init
     )
 
     print("Saving model to model.pkl")
@@ -176,7 +179,7 @@ def test():
         ep += 1
         episode_rew, nlogdetcov = 0, 0
         if args.particle_belief:
-            obs, terminated, truncated = env.reset(), False, False
+            obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
             test_init_pose.append({'agent': timelimit_env.env.agent.state,
                                    'targets': [timelimit_env.env.targets[i].state for i in range(args.nb_targets)],
                                    'belief_targets': [timelimit_env.env.belief_targets[i].state for i in
@@ -195,7 +198,7 @@ def test():
             # if args.ros_log:
             #     ros_log.log(env)
 
-            obs, rew, terminated, truncated, info = env.step(act(obs))
+            obs, rew, terminated, truncated, info = env.step(act(obs,stochastic=False))
 
             episode_rew += rew
             nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0

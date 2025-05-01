@@ -59,13 +59,21 @@ class TargetTrackingBase(gym.Env):
         self.target_init_cov = METADATA['target_init_cov']
 
         self.reset_num = 0
+        self.init_pose = []
 
     def reset(self, **kwargs):
         self.MAP.generate_map(**kwargs)
         self.has_discovered = [1] * self.num_targets # Set to 0 values for your evaluation purpose.
         self.state = []
         self.num_collisions = 0
-        return self.get_init_pose(**kwargs)
+        if "init_pose_list" in kwargs and kwargs["init_pose_list"]:
+            self.init_pose = kwargs["init_pose_list"]
+            return self.init_pose
+        if "reuse_last_init" in kwargs and kwargs["reuse_last_init"]:
+            return self.init_pose
+        else:
+            self.init_pose = self.get_init_pose(**kwargs)
+            return self.init_pose
 
     def step(self, action):
         # The agent performs an action (t -> t+1)
@@ -78,6 +86,8 @@ class TargetTrackingBase(gym.Env):
             if self.has_discovered[i]:
                 self.targets[i].update(self.agent.state[:2])
 
+        self.last_est_dists = [np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for bf in self.belief_targets]
+        self.last_ents = [bf.entropy() for bf in self.belief_targets]
         # The targets are observed by the agent (z_t+1) and the beliefs are updated.
         observed = self.observe_and_update_belief()
 

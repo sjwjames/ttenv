@@ -16,6 +16,14 @@ from collections import deque
 from replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, ParticleBeliefReplayBuffer
 from utils import save_state, load_state
 
+BATCH_SIZE = 128
+GAMMA = .9
+EPS_START = 0.9
+EPS_END = 0.05
+EPS_DECAY = 1000
+TAU = 0.005
+LR = 1e-4
+
 
 class DQNAgent:
     def __init__(self, model, target_model, num_actions, device='cpu'):
@@ -364,7 +372,7 @@ def learn(env,
           checkpoint_path=None,
           learning_starts=1000,
           gamma=1.0,
-          target_network_update_freq=500,
+          target_network_update_freq=100,
           prioritized_replay=False,
           prioritized_replay_alpha=0.6,
           prioritized_replay_beta0=0.4,
@@ -380,7 +388,8 @@ def learn(env,
           gpu_memory=1.0,
           render=False,
           device='cuda' if torch.cuda.is_available() else 'cpu',
-          particle_belief=False):
+          particle_belief=False,
+          reuse_last_init=False):
     """Train a Deep Q-Network model.
     
     Parameters
@@ -561,7 +570,7 @@ def learn(env,
         else:
             # Hard target update
             if t % target_network_update_freq == 0:
-                agent.update_target_network()
+                agent.update_target_network(TAU)
 
         # Update priorities in prioritized replay buffer
         if prioritized_replay:
@@ -572,6 +581,8 @@ def learn(env,
 
     # Create the schedule for exploration
     exploration = np.linspace(1.0, exploration_final_eps, int(exploration_fraction * max_timesteps))
+    # exploration = np.array([EPS_END + (EPS_START - EPS_END) * math.exp(-1. * steps_done / EPS_DECAY) for steps_done in
+    #                         range(max_timesteps)])
 
     # Initialize the parameters and copy them to the target network
     agent.update_target_network()
@@ -593,7 +604,7 @@ def learn(env,
     loss = 0
     t = 0
     episode_rewards_history = []
-
+    eval_steps = 1 * epoch_steps
     # Main training loop
     for t in range(max_timesteps):
         # Select action
@@ -620,16 +631,19 @@ def learn(env,
 
         # Update observation
         obs = next_obs
-
+        if num_episodes % 100 == 0:
+            rollout_dir = os.path.join(save_dir, str(num_episodes) + "_eval_rollout/")
+            if not os.path.exists(rollout_dir):
+                os.makedirs(rollout_dir)
+            env.render(log_dir=rollout_dir)
         # End of episode
         if done:
             # Update episode statistics
             num_episodes += 1
             episode_rewards.append(episode_reward)
             episode_rewards_history.append(episode_reward)
-
             # Reset environment
-            obs = env.reset()
+            obs = env.reset(reuse_last_init=reuse_last_init)
             episode_reward = 0
             episode_step = 0
 
@@ -658,5 +672,7 @@ def learn(env,
         if callback is not None:
             if callback(locals(), globals()):
                 break
-
+    if reuse_last_init:
+        with open(os.path.join(save_dir, "init_pose.pkl"), "wb") as f:
+            cloudpickle.dump(env.init_pose, f)
     return act

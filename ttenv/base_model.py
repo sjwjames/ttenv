@@ -1,6 +1,8 @@
 from typing import List
 
 import numpy as np
+import torch
+from scipy.linalg import solve_triangular, cholesky
 from scipy.stats import norm, multivariate_normal
 
 
@@ -199,12 +201,12 @@ class GMMDist:
 
     def entropy_mc_estimate(self, n_samples):
         samples = self.sample(n_samples)
-        pdfs = self.compute_pdf(samples)
+        pdfs = self.pdf(samples)
         ent = np.mean(-np.log(pdfs))
         return ent
 
     #
-    def compute_pdf(self, x):
+    def pdf(self, x):
         if np.ndim(self.covs) <= 1:
             prob = np.dot(self.weights, np.squeeze(
                 [norm.pdf(x, self.means[i], np.sqrt(self.covs[i]))
@@ -261,24 +263,24 @@ class LinearGaussianDistribution:
     def sample(self, x, n):
         if np.ndim(self.noise_mean) > 0:
             if np.ndim(x) == 1:
-                return np.random.multivariate_normal(np.matmul(x, self.coefficient) + self.noise_mean, self.noise_var,
+                return np.random.multivariate_normal(np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var,
                                                      n).squeeze()
             else:
                 return np.array([
-                    np.random.multivariate_normal(np.matmul(x[i], self.coefficient) + self.noise_mean, self.noise_var,
+                    np.random.multivariate_normal(np.matmul(self.coefficient, x[i]) + self.noise_mean, self.noise_var,
                                                   1) for i in range(n)]).squeeze()
         else:
             return np.random.normal(self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var), n)
 
     def pdf(self, y, x):
         if np.ndim(self.noise_mean) > 0:
-            return multivariate_normal.pdf(y, np.matmul(x, self.coefficient) + self.noise_mean, self.noise_var)
+            return multivariate_normal.pdf(y, np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var)
         else:
             return norm.pdf(y, self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var))
 
     def log_pdf(self, y, x):
         if np.ndim(self.noise_mean) > 0:
-            return multivariate_normal.logpdf(y, np.matmul(x, self.coefficient) + self.noise_mean, self.noise_var)
+            return multivariate_normal.logpdf(y, np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var)
         else:
             return norm.logpdf(y, self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var))
 
@@ -291,7 +293,7 @@ class LinearGaussianDistribution:
             if np.ndim(var_marg) < 1 and np.ndim(mu_marg) == 1:
                 var_marg = np.array([var_marg] * len(mu_marg))
         else:
-            mu_marg = np.matmul(np.array(x_mean), self.coefficient) + self.noise_mean
+            mu_marg = np.matmul(self.coefficient,np.array(x_mean)) + self.noise_mean
             np_x_var = np.array(x_var)
             # if np_x_var.shape[0] == np_x_var.shape[1]:
             #     var_marg = np.array(self.noise_var) + np.matmul(np.array(
@@ -307,7 +309,7 @@ class LinearGaussianDistribution:
 
     def compute_marginal_mean(self, x_mean):
         if np.ndim(self.noise_mean) > 0:
-            mu_marg = np.matmul(x_mean, self.coefficient) + self.noise_mean
+            mu_marg = np.matmul(self.coefficient,x_mean) + self.noise_mean
             return mu_marg
         else:
             mu_marg = self.coefficient * np.array(x_mean) + self.noise_mean
@@ -463,3 +465,73 @@ class AIAPos:
     def manhattan_dist_static(origin, target):
         dist = abs(origin.coord[0] - target.coord[0]) + abs(origin.coord[1] - target.coord[1])
         return dist
+
+
+def batch_mvnorm_logpdf(x, mus, Sigma):
+    # x:    (d,)
+    # mus:  (N, d)
+    # Sigma:(d, d)
+    d = x.shape[0]
+    N = mus.shape[0]
+
+    # 1) Cholesky
+    L = cholesky(Sigma, lower=True)  # (d, d)
+    log_det = 2.0 * np.sum(np.log(np.diag(L)))
+    logC = -0.5 * (d * np.log(2 * np.pi) + log_det)
+
+    # 2) Residuals
+    delta = x - mus  # (N, d)
+    # 3) Whiten all: solve L * Z = delta^T
+    Z = solve_triangular(L, delta.T, lower=True)  # (d, N)
+
+    # 4) Squared Mahalanobis
+    sqnorm = np.sum(Z * Z, axis=0)  # (N,)
+
+    # 5) PDF
+    log_pdfs = logC - 0.5 * sqnorm
+    return log_pdfs  # (N,)
+
+
+def batch_mvnorm_logpdf_multi_cov(x, mus, Sigmas):
+    """
+    x:      (d,) or (1,d)
+    mus:    (N,d)
+    Sigmas: (N,d,d)
+    returns p: (N,)
+    """
+    x = torch.tensor(x)
+    mus = torch.tensor(mus)
+    Sigmas = torch.tensor(Sigmas)
+
+    N, d = mus.shape
+
+    # 1) Batched Cholesky: Sigmas -> Ls  where Sigmas[i] = Ls[i] @ Ls[i].T
+    Ls = torch.linalg.cholesky(Sigmas)  # (N, d, d)
+
+    # 2) log-determinants
+    #    det(Sigma_i) = (prod diag(L_i))^2
+    logdets = 2.0 * torch.log(torch.diagonal(Ls, dim1=1, dim2=2)).sum(dim=1)  # (N,)
+
+    # 3) normalization constants:
+    #    log C_i = -½ [ d*log(2π) + logdet_i ]
+    logCs = -0.5 * (d * torch.log(torch.tensor(2 * torch.pi)) + logdets)  # (N,)
+
+    # 4) residuals & whitening
+    #    for each i: solve Ls[i] @ z_i = (x - mu_i).T
+    delta = x.unsqueeze(0) - mus  # (N, d)
+    # torch.triangular_solve supports batch if inputs are (N,d,1) etc:
+    zs = torch.linalg.solve_triangular(
+        Ls,  # (N, d, d)
+        delta,  # (N, d, 1)
+        upper=False,  # Ls is lower-triangular
+        left=True,  # solve L @ Z = delta
+        unitriangular=False
+    )
+    zs = zs.squeeze(-1)  # (N, d)
+
+    # 5) squared Mahalanobis norms
+    sqnorms = (zs ** 2).sum(dim=1)  # (N,)
+
+    # 6) final PDF values
+    log_pdfs = logCs - 0.5 * sqnorms
+    return log_pdfs.numpy()

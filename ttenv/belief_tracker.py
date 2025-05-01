@@ -4,6 +4,7 @@ KFbelief : Belief Update using Kalman Filter
 UKFbelief : Belief Update using Unscented Kalman Filter using filterpy library
 """
 import numpy as np
+import torch
 from numpy import linalg as LA
 from scipy.stats import multivariate_normal
 
@@ -11,7 +12,8 @@ import ttenv.util as util
 
 from filterpy.kalman import JulierSigmaPoints, UnscentedKalmanFilter, ExtendedKalmanFilter
 
-from ttenv.base_model import ParticleDist, LinearGaussianDistribution
+from ttenv.base_model import ParticleDist, LinearGaussianDistribution, GMMDist, batch_mvnorm_logpdf, \
+    batch_mvnorm_logpdf_multi_cov
 
 REG_PARAM = 1e-9
 
@@ -84,6 +86,10 @@ class KFbelief(object):
 
         self.cov = np.matmul(C, self.cov)
         self.state = np.clip(self.state + np.matmul(K, innov), self.limit[0], self.limit[1])
+
+    def entropy(self):
+        k = 2
+        return 0.5 * np.log(np.linalg.det(self.cov)) + 0.5 * np.log(2 * np.pi) * k + 0.5 * k
 
 
 class UKFbelief(object):
@@ -208,45 +214,59 @@ class UKFbelief(object):
         self.cov = self.ukf.P
         self.state = np.clip(self.ukf.x, self.limit[0], self.limit[1])
 
+    def entropy(self):
+        k = 2
+        return 0.5 * np.log(np.linalg.det(self.cov)) + 0.5 * np.log(2 * np.pi) * k + 0.5 * k
+
 
 class PFbelief(object):
-    def __init__(self, dim, limit, transition_func, prior_dist, n, effective_n, dim_z=2,
+    def __init__(self, dim, limit, transition_func, n, effective_n, dim_z=2,
                  obs_noise_func=None, collision_func=None):
         self.dim = dim
         self.dim_z = dim_z
         self.limit = limit
         self.n = n
         self.effective_n = effective_n
-        self.prior_dist = prior_dist
         self.weights = np.array([1 / n] * n)
-        self.states = self.prior_dist.sample(n)
         self.transition_func = transition_func
         self.collision_func = collision_func
         self.obs_noise_func = obs_noise_func
+
+    def reset(self,prior_dist):
+        self.states = prior_dist.sample(self.n)
+        self.states = np.clip(self.states,self.limit[0],self.limit[1])
+        self.weights = np.array([1 / self.n] * self.n)
         self.state, self.cov = self.calculate_bs_moments()
 
-    def reset(self):
-        self.weights = np.array([1 / self.n] * self.n)
-        self.states = self.prior_dist.sample(self.n)
-        self.state, self.cov = self.calculate_bs_moments()
 
     def predict(self):
-        pass
+        self.states = self.transition_func.sample(self.states, self.n)
+        # self.states = np.array([np.matmul(self.transition_func.coefficient,state) for state in self.states])
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
+        self.state, self.cov = self.calculate_bs_moments()
 
-    def update(self, observation, agent_state):
-        next_state_samples = self.transition_func.sample(self.resample(), self.n)
-        obs_means = [list(util.relative_distance_polar(state_sample[:2],
-                                                xy_base=agent_state[:2],
-                                                theta_base=agent_state[2])) for state_sample in
-                        next_state_samples]
-        obs_noise_cov = self.obs_noise_func(())
-
-        un_normed_cond_ll_probs = [multivariate_normal.pdf(observation,m,obs_noise_cov) for m in obs_means]
-
-        cond_ll_probs = un_normed_cond_ll_probs / np.sum(un_normed_cond_ll_probs)
-        cond_ll_probs[cond_ll_probs == 0.0] += REG_PARAM
-        log_cond_ll_probs = np.log(cond_ll_probs)
-        log_weights_new = log_cond_ll_probs + np.log(self.weights)
+    def update(self, observation_info, agent_state):
+        observed = observation_info[0]
+        observation = observation_info[1]
+        next_state_samples = self.states
+        # obs_means = [list(util.relative_distance_polar(state_sample[:2],
+        #                                                xy_base=agent_state[:2],
+        #                                                theta_base=agent_state[2])) for state_sample in
+        #              next_state_samples]
+        # obs_noise_covs = [self.obs_noise_func(observation, target=state_sample[:2], agent=agent_state[:2]) for
+        #                   state_sample in
+        #                   next_state_samples]
+        # un_normed_cond_ll_logprobs = batch_mvnorm_logpdf(np.array(observation),np.array(obs_means),np.array(obs_noise_covs))
+        # un_normed_cond_ll_logprobs = batch_mvnorm_logpdf_multi_cov(np.array(observation), np.array(obs_means),
+        #                                                            np.array(obs_noise_covs))
+        un_normed_cond_ll_logprobs = [
+            multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
+                                                                                      xy_base=agent_state[:2],
+                                                                                      theta_base=agent_state[2])),
+                                       self.obs_noise_func(observed, target=state_sample[:2], agent=agent_state[:2]))
+            for state_sample in
+            next_state_samples]
+        log_weights_new = un_normed_cond_ll_logprobs + np.log(self.weights)
         log_weights_new = log_weights_new - np.max(log_weights_new)
         if np.sum(np.exp(log_weights_new)) != 0:
             weights_new = np.exp(log_weights_new) / np.sum(np.exp(log_weights_new))
@@ -263,6 +283,7 @@ class PFbelief(object):
 
         self.weights = weights_new
         self.states = next_state_samples
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
     def resample(self):
@@ -287,9 +308,13 @@ class PFbelief(object):
         return mean_val, var_val
 
     def entropy(self):
-        m, c = self.calculate_bs_moments()
-        k = len(m)
-        return 0.5 * np.log(np.linalg.det(c)) + 0.5 * np.log(2 * np.pi) * k + 0.5 * k
+        state_dim = len(self.states[0])
+        gmm_approx = GMMDist(self.weights, self.states, [np.eye(state_dim) * 0.01 for _ in self.weights])
+        ent = gmm_approx.sg_entropy_ub()
+        return ent
+        # m, c = self.calculate_bs_moments()
+        # k = len(m)
+        # return 0.5 * np.log(np.linalg.det(c)) + 0.5 * np.log(2 * np.pi) * k + 0.5 * k
         # agg = defaultdict(float)
         # for pt, w in zip(self.states, self.weights):
         #     agg[tuple(pt)] += w
