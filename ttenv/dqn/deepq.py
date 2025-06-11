@@ -14,14 +14,17 @@ import torch.nn.functional as F
 from collections import deque
 
 from replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, ParticleBeliefReplayBuffer
+from ttenv.agent_models import SE2Dynamics
+from ttenv.metadata import METADATA
 from utils import save_state, load_state
+import matplotlib.pyplot as plt
 
 BATCH_SIZE = 128
 GAMMA = .9
 EPS_START = 0.9
 EPS_END = 0.05
-EPS_DECAY = 1000
-TAU = 0.005
+EPS_DECAY = 50000
+TAU = .005
 LR = 1e-4
 
 
@@ -48,7 +51,7 @@ class DQNAgent:
         # Copy weights from model to target_model
         self.update_target_network(1.0)
 
-    def act(self, observation, epsilon=0.0):
+    def act(self, observation, epsilon=0.0, **kwargs):
         """Select an action based on current observation using epsilon-greedy policy.
         
         Parameters
@@ -148,7 +151,7 @@ class PFDQNAgent:
         # Copy weights from model to target_model
         self.update_target_network(1.0)
 
-    def act(self, observations, epsilon=0.0):
+    def act(self, observations, epsilon=0.0, **kwargs):
         """Select an action based on current observation using epsilon-greedy policy.
 
         Parameters
@@ -167,6 +170,26 @@ class PFDQNAgent:
             return np.random.randint(self.num_actions)
         target_belief = observations["target"]
         agent_info = observations["agent"]
+        if "env" in kwargs:
+            env = kwargs["env"]
+            action_map = env.action_map
+            next_target_states = [
+                np.average(np.clip(bf.transition_func.sample(bf.states, bf.n), bf.limit[0], bf.limit[1]), axis=0,
+                           weights=bf.weights) for
+                i, bf in enumerate(env.belief_targets)]
+            current_max = -np.inf
+            current_max_ac = -1
+            agent_info = agent_info.numpy().squeeze()
+            for a in action_map.keys():
+                next_agent = SE2Dynamics(agent_info[:3], 0.5, action_map[a])
+                reward = np.sum(
+                    [- np.linalg.norm(np.array(bf[:2]) - np.array(next_agent[:2]))
+                     for i, bf in enumerate(next_target_states)])
+                if reward > current_max:
+                    current_max = reward
+                    current_max_ac = a
+            return current_max_ac
+
         with torch.no_grad():
             q_values = self.model(target_belief, agent_info)
         return q_values.argmax(dim=1).item()
@@ -223,8 +246,13 @@ class PFDQNAgent:
         if tau == 1.0:
             self.target_model.load_state_dict(self.model.state_dict())
         else:
-            for target_param, param in zip(self.target_model.parameters(), self.model.parameters()):
-                target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+            target_net_state_dict = self.target_model.state_dict()
+            policy_net_state_dict = self.model.state_dict()
+            for key in policy_net_state_dict:
+                target_net_state_dict[key] = policy_net_state_dict[key] * TAU + target_net_state_dict[key] * (1.0 - TAU)
+            self.target_model.load_state_dict(target_net_state_dict)
+            # for target_param, param in zip(self.target_model.parameters(), self.model.parameters()):
+            #     target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
 
 
 class ActWrapper:
@@ -241,7 +269,7 @@ class ActWrapper:
         self._agent = agent
         self._act_params = act_params
 
-    def __call__(self, observation, stochastic=True, update_eps=-1):
+    def __call__(self, observation, stochastic=True, update_eps=-1, **kwargs):
         """Select an action based on the observation.
         
         Parameters
@@ -259,7 +287,7 @@ class ActWrapper:
             Selected action
         """
         epsilon = self._act_params.get('epsilon', 0.1) if update_eps < 0 else update_eps
-        return self._agent.act(observation, epsilon=epsilon * stochastic)
+        return self._agent.act(observation, epsilon=epsilon * stochastic, **kwargs)
 
     @staticmethod
     def load(path, act_params_new=None, **kwargs):
@@ -278,32 +306,31 @@ class ActWrapper:
             Wrapper for the agent's act function
         """
         with open(path, "rb") as f:
-            model_data, act_params = cloudpickle.load(f)
-
-        if act_params_new:
-            for (k, v) in act_params_new.items():
-                act_params[k] = v
-
-        device = act_params.get('device', 'cpu')
-        model = act_params['q_func'](act_params['num_actions']).to(device)
-        target_model = act_params['q_func'](act_params['num_actions']).to(device)
-        if act_params["particle_belief"]:
-            agent = PFDQNAgent(model, target_model, act_params['num_actions'], device)
-        else:
-            agent = DQNAgent(model, target_model, act_params['num_actions'], device)
-
-        with tempfile.TemporaryDirectory() as td:
-            arc_path = os.path.join(td, "packed.zip")
-            with open(arc_path, "wb") as f:
-                f.write(model_data)
-
-            zipfile.ZipFile(arc_path, 'r', zipfile.ZIP_DEFLATED).extractall(td)
-
-            state_dict = torch.load(os.path.join(td, "model"), map_location=device)
-            model.load_state_dict(state_dict['model_state_dict'])
-            target_model.load_state_dict(state_dict['target_state_dict'])
-
-        return ActWrapper(agent, act_params)
+            agent, act_params = cloudpickle.load(f)
+            return ActWrapper(agent, act_params)
+        # if act_params_new:
+        #     for (k, v) in act_params_new.items():
+        #         act_params[k] = v
+        #
+        # device = act_params.get('device', 'cpu')
+        # model = act_params['q_func'](act_params['num_actions']).to(device)
+        # target_model = act_params['q_func'](act_params['num_actions']).to(device)
+        #
+        # with tempfile.TemporaryDirectory() as td:
+        #     arc_path = os.path.join(td, "packed.zip")
+        #     with open(arc_path, "wb") as f:
+        #         f.write(model_data)
+        #
+        #     zipfile.ZipFile(arc_path, 'r', zipfile.ZIP_DEFLATED).extractall(td)
+        #
+        #     state_dict = torch.load(os.path.join(td, "model"), map_location=device)
+        #     model.load_state_dict(state_dict['model_state_dict'])
+        #     target_model.load_state_dict(state_dict['target_state_dict'])
+        #
+        #     if act_params["particle_belief"]:
+        #         agent = PFDQNAgent(model, target_model, act_params['num_actions'], device)
+        #     else:
+        #         agent = DQNAgent(model, target_model, act_params['num_actions'], device)
 
     def save(self, path=None):
         """Save agent to a file.
@@ -316,26 +343,26 @@ class ActWrapper:
         if path is None:
             path = os.path.join(os.getcwd(), "model.pkl")
 
-        with tempfile.TemporaryDirectory() as td:
-            save_path = os.path.join(td, "model")
-            torch.save({
-                'model_state_dict': self._agent.model.state_dict(),
-                'target_state_dict': self._agent.target_model.state_dict()
-            }, save_path)
-
-            arc_name = os.path.join(td, "packed.zip")
-            with zipfile.ZipFile(arc_name, 'w') as zipf:
-                for root, dirs, files in os.walk(td):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        if file_path != arc_name:
-                            zipf.write(file_path, os.path.relpath(file_path, td))
-
-            with open(arc_name, "rb") as f:
-                model_data = f.read()
+        # with tempfile.TemporaryDirectory() as td:
+        #     save_path = os.path.join(td, "model")
+        #     torch.save({
+        #         'model_state_dict': self._agent.model.state_dict(),
+        #         'target_state_dict': self._agent.target_model.state_dict()
+        #     }, save_path)
+        #
+        #     arc_name = os.path.join(td, "packed.zip")
+        #     with zipfile.ZipFile(arc_name, 'w') as zipf:
+        #         for root, dirs, files in os.walk(td):
+        #             for file in files:
+        #                 file_path = os.path.join(root, file)
+        #                 if file_path != arc_name:
+        #                     zipf.write(file_path, os.path.relpath(file_path, td))
+        #
+        #     with open(arc_name, "rb") as f:
+        #         model_data = f.read()
 
         with open(path, "wb") as f:
-            cloudpickle.dump((model_data, self._act_params), f)
+            cloudpickle.dump((self._agent, self._act_params), f)
 
 
 def load(path, act_params=None):
@@ -358,7 +385,7 @@ def load(path, act_params=None):
 
 def learn(env,
           q_func,
-          lr=5e-4,
+          lr=1e-4,
           lr_decay_factor=0.99,
           lr_growth_factor=1.01,
           max_timesteps=100000,
@@ -366,12 +393,12 @@ def learn(env,
           exploration_fraction=0.1,
           exploration_final_eps=0.02,
           train_freq=1,
-          batch_size=32,
+          batch_size=128,
           print_freq=100,
           checkpoint_freq=10000,
           checkpoint_path=None,
-          learning_starts=1000,
-          gamma=1.0,
+          learning_starts=-1,
+          gamma=.9,
           target_network_update_freq=100,
           prioritized_replay=False,
           prioritized_replay_alpha=0.6,
@@ -489,7 +516,7 @@ def learn(env,
 
     # Create optimizer
     optimizer = optim.Adam(model.parameters(), lr=lr)
-
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
     # Initialize variables
     num_episodes = 0
     episode_rewards = deque(maxlen=100)
@@ -519,7 +546,7 @@ def learn(env,
                                                     dtype=torch.float32), None
             q_t = model(obses_t)
         # Compute current Q-values
-        q_t_selected = q_t.gather(1, actions.unsqueeze(1)).squeeze(1)
+        q_t_selected = q_t.gather(1, actions.unsqueeze(1))
 
         # Compute next Q-values using target network
         with torch.no_grad():
@@ -541,7 +568,6 @@ def learn(env,
                 else:
                     q_tp1 = model(obses_tp1)
                 q_tp1_best = q_tp1.max(1)[0]
-
             # Zero out Q-values for terminal states
             q_tp1_best = q_tp1_best * (1.0 - dones)
 
@@ -550,18 +576,24 @@ def learn(env,
 
         # Compute Huber loss
         td_error = q_t_selected - td_target
-        loss = F.smooth_l1_loss(q_t_selected, td_target, reduction='none')
+        criterion = nn.SmoothL1Loss()
+        loss = criterion(q_t_selected, td_target.unsqueeze(1))
+
+        # loss = F.smooth_l1_loss(q_t_selected, td_target, reduction='none')
 
         # Apply importance weights from prioritized replay
-        weighted_loss = torch.mean(loss * weights)
+        # weighted_loss = torch.mean(loss * weights)
 
         # Optimize the model
         optimizer.zero_grad()
-        weighted_loss.backward()
+        loss.backward()
+
         # Clip gradients to prevent exploding gradients
-        for param in model.parameters():
-            param.grad.data.clamp_(-1, 1)
+        # for param in model.parameters():
+        #     param.grad.data.clamp_(-1, 1)
+        torch.nn.utils.clip_grad_value_(model.parameters(), 100)
         optimizer.step()
+        # scheduler.step()
 
         # Update target network if it's time
         if target_network_update_freq < 1:
@@ -569,7 +601,7 @@ def learn(env,
             agent.update_target_network(target_network_update_freq)
         else:
             # Hard target update
-            if t % target_network_update_freq == 0:
+            if t != 0 and t % target_network_update_freq == 0:
                 agent.update_target_network(TAU)
 
         # Update priorities in prioritized replay buffer
@@ -583,6 +615,7 @@ def learn(env,
     exploration = np.linspace(1.0, exploration_final_eps, int(exploration_fraction * max_timesteps))
     # exploration = np.array([EPS_END + (EPS_START - EPS_END) * math.exp(-1. * steps_done / EPS_DECAY) for steps_done in
     #                         range(max_timesteps)])
+    # exploration = np.array([.1] * max_timesteps)
 
     # Initialize the parameters and copy them to the target network
     agent.update_target_network()
@@ -605,9 +638,15 @@ def learn(env,
     t = 0
     episode_rewards_history = []
     eval_steps = 1 * epoch_steps
+    episode_discovery_rate_dist = []
+    lin_dist_range_a2b = METADATA["lin_dist_range_a2b"]
+    lin_dist_range_b2t = METADATA["lin_dist_range_b2t"]
+    ang_dist_range_a2b = METADATA["ang_dist_range_a2b"]
+    add_times = 0
     # Main training loop
     for t in range(max_timesteps):
         # Select action
+
         action = act(obs, stochastic=True, update_eps=exploration[min(t, len(exploration) - 1)])
 
         # Execute action and observe next state
@@ -631,7 +670,7 @@ def learn(env,
 
         # Update observation
         obs = next_obs
-        if num_episodes % 100 == 0:
+        if num_episodes % (checkpoint_freq // epoch_steps) == 0:
             rollout_dir = os.path.join(save_dir, str(num_episodes) + "_eval_rollout/")
             if not os.path.exists(rollout_dir):
                 os.makedirs(rollout_dir)
@@ -642,8 +681,24 @@ def learn(env,
             num_episodes += 1
             episode_rewards.append(episode_reward)
             episode_rewards_history.append(episode_reward)
+            episode_discovery_rate_dist.append([dr / epoch_steps for dr in env.discover_cnt])
+            # temp code, for binary reward
+            if num_episodes % 100 == 0 and np.mean(episode_rewards) > 90.0:
+                # env.init_pose["targets"][0][0] = np.clip(env.init_pose["targets"][0][0] + 1, env.MAP.mapmin[0],
+                #                                          env.MAP.mapmax[0] - 1.0)
+                # env.init_pose["targets"][0][1] = np.clip(env.init_pose["targets"][0][1] + 1, env.MAP.mapmin[1],
+                #                                          env.MAP.mapmax[1] - 1.0)
+                add_times += 1
+                lin_dist_range_a2b = (lin_dist_range_a2b[0], min(20.0, lin_dist_range_a2b[1] + add_times * 1.0))
+                lin_dist_range_b2t = (lin_dist_range_b2t[0], min(20.0, lin_dist_range_b2t[1] + add_times * 1.0))
+                ang_dist_range_a2b = (max(-np.pi,ang_dist_range_a2b[0]-add_times*.1),min(np.pi,ang_dist_range_a2b[1]+add_times*.1))
+                speed = min(env.target_speed_limit + .1, 1.0)
+                env.set_limits(target_speed_limit=speed)
+                env.init_pose["targets"][0][2] = speed
+                env.targets[0].limit = env.limit['target']
             # Reset environment
-            obs = env.reset(reuse_last_init=reuse_last_init)
+            obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,
+                            lin_dist_range_b2t=lin_dist_range_b2t)
             episode_reward = 0
             episode_step = 0
 
@@ -664,7 +719,7 @@ def learn(env,
             if checkpoint_path is not None:
                 if mean_100ep_reward > saved_mean_reward:
                     print(
-                        f"Saving model due to mean reward increase: {saved_mean_reward:.2f} -> {mean_100ep_reward:.2f}")
+                        f"mean reward increase: {saved_mean_reward:.2f} -> {mean_100ep_reward:.2f}")
                     act.save(checkpoint_path)
                     saved_mean_reward = mean_100ep_reward
 
@@ -675,4 +730,19 @@ def learn(env,
     if reuse_last_init:
         with open(os.path.join(save_dir, "init_pose.pkl"), "wb") as f:
             cloudpickle.dump(env.init_pose, f)
+    # plt.plot(np.arange(0,num_episodes),episode_last_step_dist)
+    # plt.savefig(os.path.join(save_dir, "last step distance.png"))
+    # if np.mean(episode_rewards)>saved_mean_reward:
+    #     act.save(checkpoint_path)
+    act.save(checkpoint_path)
+    print(np.sum([float(sum(dr) > 0) for dr in episode_discovery_rate_dist[-100:]]) / 100.0)
+    print(episode_rewards_history)
+    np.savetxt(save_dir + "_returns.csv", episode_rewards_history, delimiter=',')
+    fig = plt.figure()
+    ax = fig.subplots()
+    ax.plot(np.arange(0, num_episodes), episode_rewards_history)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Return")
+    plt.savefig(os.path.join(save_dir, "_returns.png"))
+    plt.close(fig)
     return act

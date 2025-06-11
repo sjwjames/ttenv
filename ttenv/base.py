@@ -60,12 +60,15 @@ class TargetTrackingBase(gym.Env):
 
         self.reset_num = 0
         self.init_pose = []
+        self.discover_cnt = [0 for _ in range(self.num_targets)]
 
     def reset(self, **kwargs):
         self.MAP.generate_map(**kwargs)
         self.has_discovered = [1] * self.num_targets # Set to 0 values for your evaluation purpose.
         self.state = []
         self.num_collisions = 0
+        self.discover_cnt = [0 for _ in range(self.num_targets)]
+
         if "init_pose_list" in kwargs and kwargs["init_pose_list"]:
             self.init_pose = kwargs["init_pose_list"]
             return self.init_pose
@@ -254,6 +257,7 @@ class TargetTrackingBase(gym.Env):
             observed.append(observation[0])
             if observation[0]: # if observed, update the target belief.
                 self.belief_targets[i].update(observation[1], self.agent.state)
+                self.discover_cnt[i]+=1
                 if not(self.has_discovered[i]):
                     self.has_discovered[i] = 1
         return observed

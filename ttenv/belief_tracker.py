@@ -234,7 +234,7 @@ class PFbelief(object):
 
     def reset(self,prior_dist):
         self.states = prior_dist.sample(self.n)
-        self.states = np.clip(self.states,self.limit[0],self.limit[1])
+        # self.states = np.clip(self.states,self.limit[0],self.limit[1])
         self.weights = np.array([1 / self.n] * self.n)
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -263,7 +263,7 @@ class PFbelief(object):
             multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
                                                                                       xy_base=agent_state[:2],
                                                                                       theta_base=agent_state[2])),
-                                       self.obs_noise_func(observed, target=state_sample[:2], agent=agent_state[:2]))
+                                       self.obs_noise_func(observed))
             for state_sample in
             next_state_samples]
         log_weights_new = un_normed_cond_ll_logprobs + np.log(self.weights)
@@ -320,3 +320,5 @@ class PFbelief(object):
         #     agg[tuple(pt)] += w
         # agg_weights = list(agg.values())
         # return -np.dot(agg_weights, np.log(agg_weights))
+
+

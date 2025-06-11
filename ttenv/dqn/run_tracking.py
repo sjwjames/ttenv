@@ -24,13 +24,13 @@ parser.add_argument('--mode', choices=['train', 'test'], default='train')
 parser.add_argument('--dueling', type=int, default=0)
 parser.add_argument('--nb_train_steps', type=int, default=5000)
 parser.add_argument('--buffer_size', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--nb_warmup_steps', type=int, default=100)
 parser.add_argument('--nb_epoch_steps', type=int, default=100)
 parser.add_argument('--target_update_freq', type=float, default=50)  # This should be smaller than epoch_steps
 parser.add_argument('--checkpoint_freq', type=int, default=1000)
 parser.add_argument('--nb_test_steps', type=int, default=10)
-parser.add_argument('--learning_rate', type=float, default=0.001)
+parser.add_argument('--learning_rate', type=float, default=0.0001)
 parser.add_argument('--learning_rate_decay_factor', type=float, default=1.0)
 parser.add_argument('--learning_rate_growth_factor', type=float, default=1.0)
 parser.add_argument('--gamma', type=float, default=.99)
@@ -85,12 +85,24 @@ def train(seed, save_dir):
         # Create MLP model
         model_fn = get_mlp_model(
             input_dim=env.observation_space.shape[0],
-            hiddens=hiddens
+            hiddens=hiddens,
+            layer_norm=True
         )
+
+        # temp code delete later
+        # model_fn = get_mlp_model(
+        #     input_dim=env.num_targets*3,
+        #     hiddens=hiddens
+        # )
     else:
         # 1 for particle weight, 2 for obstacle info, observed info per target
-        model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
-                                        env.env.agent.dim + 2 + args.nb_targets)
+        # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
+        #                                 env.env.agent.dim + 2 + args.nb_targets)
+
+        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets)
+
+        # model_fn = get_deepsetmlp_model((1 + 2) * args.nb_targets,
+        #                                 env.env.agent.dim)
 
     act = learn(
         env,
@@ -151,11 +163,12 @@ def test():
                      num_targets=args.nb_targets,
                      is_training=False,
                      im_size=args.im_size,
+                     T_steps=args.nb_epoch_steps
                      )
 
-    timelimit_env = env
-    while (not hasattr(timelimit_env, '_elapsed_steps')):
-        timelimit_env = timelimit_env.env
+    # timelimit_env = env
+    # while (not hasattr(timelimit_env, '_elapsed_steps')):
+    #     timelimit_env = timelimit_env.env
 
     # Load the model
     act = load(os.path.join(args.log_dir, args.log_fname), {"particle_belief": args.particle_belief})
@@ -180,15 +193,15 @@ def test():
         episode_rew, nlogdetcov = 0, 0
         if args.particle_belief:
             obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-            test_init_pose.append({'agent': timelimit_env.env.agent.state,
-                                   'targets': [timelimit_env.env.targets[i].state for i in range(args.nb_targets)],
-                                   'belief_targets': [timelimit_env.env.belief_targets[i].state for i in
+            test_init_pose.append({'agent': env.agent.state,
+                                   'targets': [env.targets[i].state for i in range(args.nb_targets)],
+                                   'belief_targets': [env.belief_targets[i].state for i in
                                                       range(args.nb_targets)]})
         else:
             obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-            test_init_pose.append({'agent': timelimit_env.env.agent.state,
-                                   'targets': [timelimit_env.env.targets[i].state for i in range(args.nb_targets)],
-                                   'belief_targets': [timelimit_env.env.belief_targets[i].state for i in
+            test_init_pose.append({'agent': env.agent.state,
+                                   'targets': [env.targets[i].state for i in range(args.nb_targets)],
+                                   'belief_targets': [env.belief_targets[i].state for i in
                                                       range(args.nb_targets)]})
         s_time = time.time()
 
@@ -197,9 +210,9 @@ def test():
                 env.render(log_dir=args.log_dir)
             # if args.ros_log:
             #     ros_log.log(env)
-
-            obs, rew, terminated, truncated, info = env.step(act(obs,stochastic=False))
-
+            action = act(obs, stochastic=False)
+            next_obs, rew, terminated, truncated, info = env.step(action)
+            obs = next_obs
             episode_rew += rew
             nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
 

@@ -5,6 +5,8 @@ import os
 
 import matplotlib
 
+from ttenv.belief_tracker import PFbelief
+
 matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
@@ -48,7 +50,7 @@ class Display2D(Wrapper):
             self.traj_y[i][1].append(target_true_pos[i][1])
         return self.env.step(action)
 
-    def render(self, record=False, batch_outputs=None,**kwargs):
+    def render(self, record=False, batch_outputs=None, **kwargs):
         state = self.env_core.agent.state
         num_targets = len(self.traj_y)
         if type(self.env_core.targets) == list:
@@ -106,6 +108,11 @@ class Display2D(Wrapper):
                     angle=180 / np.pi * np.arctan2(np.real(eig_vec[0][1]),
                                                    np.real(eig_vec[0][0])), fill=True, zorder=2,
                     facecolor='g', alpha=0.5)
+                if isinstance(self.env_core.belief_targets[i], PFbelief):
+                    particles = np.array(self.env_core.belief_targets[i].states)
+                    ax.scatter(particles[:, 0], particles[:, 1],
+                               c=1 - np.array(self.env_core.belief_targets[i].weights), cmap='gray',
+                               label="Target Belief")
                 ax.add_patch(belief_target)
 
                 if target_cov[i].shape[0] == 4:  # For Velocity
@@ -155,6 +162,7 @@ class Display2D(Wrapper):
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 5.,
                     'v_target:%.2f' % np.sqrt(np.sum(self.env_core.targets[0].state[2:] ** 2)))
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 10., 'v_agent:%.2f' % self.env_core.agent.vw[0])
+            ax.text(self.mapmax[0] + 1., self.mapmax[1] - 15., 'w_agent:%.2f' % self.env_core.agent.vw[1])
             ax.set_xlim((self.mapmin[0], self.mapmax[0]))
             ax.set_ylim((self.mapmin[1], self.mapmax[1]))
             ax.set_title("Trajectory %d" % self.traj_num)
@@ -179,7 +187,7 @@ class Display2D(Wrapper):
                 # plt.draw()
                 # plt.pause(0.0001)
                 if "log_dir" in kwargs:
-                    plt.savefig(kwargs["log_dir"]+"test"+str(self.n_frames)+".png")
+                    plt.savefig(kwargs["log_dir"] + "test" + str(self.n_frames) + ".png")
                 else:
                     plt.savefig("test" + str(self.n_frames) + ".png")
 
