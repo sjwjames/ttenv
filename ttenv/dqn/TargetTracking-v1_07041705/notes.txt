@@ -1,1 +1,0 @@
-random initialization pose and increasing speed

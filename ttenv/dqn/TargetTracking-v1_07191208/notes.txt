@@ -1,1 +1,0 @@
-add heavy penalty to collision

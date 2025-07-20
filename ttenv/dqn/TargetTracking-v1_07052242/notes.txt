@@ -1,1 +1,0 @@
-add collision penalty to binary reward
