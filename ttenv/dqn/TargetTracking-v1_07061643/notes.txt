@@ -1,0 +1,1 @@
+random initial pose, speed limit 3, binary reward

@@ -183,43 +183,174 @@ class CNNToMLP(nn.Module):
         return q_out
 
 
+class CNNPlusMLP(nn.Module):
+    def __init__(self, input_channels, convs, hiddens, num_actions, dueling=False,
+                 layer_norm=False, init_mean=1.0, init_sd=20.0, pooling=False,
+                 inpt_dim=(50, 50)):
+        super(CNNPlusMLP, self).__init__()
+        self.dueling = dueling
+        self.layer_norm = layer_norm
+        self.pooling = pooling
+        self.inpt_dim = inpt_dim
+
+        # Convolutional layers
+        self.conv_layers = nn.ModuleList()
+        for num_outputs, kernel_size, stride in convs:
+            self.conv_layers.append(nn.Conv2d(input_channels, num_outputs,
+                                              kernel_size=kernel_size, stride=stride))
+            input_channels = num_outputs
+
+        # Calculate the size of flattened conv output
+        self.conv_output_size = self._get_conv_output_size(input_channels, convs)
+
+        # Action value layers
+        self.action_layers = nn.ModuleList()
+        prev_size = self.conv_output_size + (inpt_dim[0] * inpt_dim[1])
+        for hidden in hiddens:
+            self.action_layers.append(nn.Linear(prev_size, hidden))
+            if layer_norm:
+                self.action_layers.append(nn.LayerNorm(hidden))
+            prev_size = hidden
+
+        self.action_output = nn.Linear(hiddens[-1], num_actions)
+
+        if dueling:
+            # State value layers
+            self.state_layers = nn.ModuleList()
+            prev_size = self.conv_output_size + (inpt_dim[0] * inpt_dim[1])
+            for hidden in hiddens:
+                self.state_layers.append(nn.Linear(prev_size, hidden))
+                if layer_norm:
+                    self.state_layers.append(nn.LayerNorm(hidden))
+                prev_size = hidden
+
+            self.state_output = nn.Linear(hiddens[-1], 1)
+
+        # Initialize biases
+        bias_init = [init_mean for _ in range(num_actions // 2)]
+        bias_init.extend([-np.log(init_sd) for _ in range(num_actions // 2)])
+        self.action_output.bias.data = torch.tensor(bias_init, dtype=torch.float32)
+        self.action_output.weight.data.zero_()
+
+    def _get_conv_output_size(self, input_channels, convs):
+        size = self.inpt_dim[0]
+        channels = input_channels
+        for _, kernel_size, stride in convs:
+            size = (size - kernel_size) // stride + 1
+            if self.pooling:
+                size = size // 2
+        return channels * size * size
+
+    def forward(self, x):
+        # Split input into image and continuous parts
+        batch_size = x.size(0)
+        img_size = self.inpt_dim[0] * self.inpt_dim[1]
+        img_input = x[:, :img_size].view(batch_size, 1, self.inpt_dim[0], self.inpt_dim[1])
+        continuous_input = x[:, img_size:]
+
+        # Convolutional layers
+        conv_out = img_input
+        for conv_layer in self.conv_layers:
+            conv_out = F.relu(conv_layer(conv_out))
+            if self.pooling:
+                conv_out = F.max_pool2d(conv_out, kernel_size=2, stride=2)
+        conv_out = conv_out.view(batch_size, -1)
+
+        # Combine conv output with continuous input
+        combined_input = torch.cat([conv_out, continuous_input], dim=1)
+
+        # Action value stream
+        action_out = combined_input
+        for i, layer in enumerate(self.action_layers):
+            if isinstance(layer, nn.Linear):
+                action_out = layer(action_out)
+            elif isinstance(layer, nn.LayerNorm):
+                action_out = layer(action_out)
+            action_out = F.relu(action_out)
+        action_scores = self.action_output(action_out)
+
+        if self.dueling:
+            # State value stream
+            state_out = combined_input
+            for i, layer in enumerate(self.state_layers):
+                if isinstance(layer, nn.Linear):
+                    state_out = layer(state_out)
+                elif isinstance(layer, nn.LayerNorm):
+                    state_out = layer(state_out)
+                state_out = F.relu(state_out)
+            state_score = self.state_output(state_out)
+
+            # Combine state and action values
+            action_scores_mean = action_scores.mean(dim=1, keepdim=True)
+            action_scores_centered = action_scores - action_scores_mean
+            return state_score + action_scores_centered
+
+        return action_scores
+
+
 class ParticleDeepSetMLP(nn.Module):
     def __init__(self, target_dim, agent_dim, output_dim, layer_norm=True):
         super(ParticleDeepSetMLP, self).__init__()
         self.target_dim = target_dim
         self.agent_dim = agent_dim
         self.output_dim = output_dim
-        hidden_dim = 64
-        # agent embedding
-        self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, 64), nn.ReLU(), nn.Linear(64, target_dim))
+        hidden_dim = 16
 
-        self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim), nn.ReLU(),
-                                      nn.Linear(hidden_dim, 128), nn.ReLU(),
-                                      nn.Linear(128, hidden_dim))
         reg_dim = hidden_dim
         if layer_norm:
-            self.regressor = nn.Sequential(nn.Linear(reg_dim, 128), nn.LayerNorm(128), nn.ReLU(), nn.Linear(128, 64),
-                                           nn.LayerNorm(64), nn.ReLU(),
-                                           nn.Linear(64, output_dim))
+            # agent embedding
+            # self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.ReLU(),
+            #                                      nn.Linear(hidden_dim, target_dim), nn.LayerNorm(target_dim))
+            #
+            # self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.ReLU(),
+            #                               nn.Linear(hidden_dim, hidden_dim * 2), nn.LayerNorm(hidden_dim * 2),
+            #                               nn.ReLU(),
+            #                               nn.Linear(hidden_dim * 2, hidden_dim), nn.LayerNorm(hidden_dim))
+            self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.ReLU(),
+                                                 nn.Linear(hidden_dim, target_dim))
+
+            self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim), nn.ReLU(),
+                                          nn.Linear(hidden_dim, hidden_dim * 2), nn.ReLU(),
+                                          nn.Linear(hidden_dim * 2, hidden_dim))
+            self.regressor = nn.Sequential(nn.Linear(reg_dim, hidden_dim * 2), nn.LayerNorm(hidden_dim * 2), nn.ReLU(),
+                                           nn.Linear(hidden_dim * 2, hidden_dim),
+                                           nn.LayerNorm(hidden_dim), nn.ReLU(),
+                                           nn.Linear(hidden_dim, output_dim))
         else:
-            self.regressor = nn.Sequential(nn.Linear(reg_dim, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(),
-                                           nn.Linear(64, output_dim))
+            # agent embedding
+            self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.ReLU(),
+                                                 nn.Linear(hidden_dim, target_dim))
+
+            self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim), nn.ReLU(),
+                                          nn.Linear(hidden_dim, hidden_dim * 2), nn.ReLU(),
+                                          nn.Linear(hidden_dim * 2, hidden_dim))
+            self.regressor = nn.Sequential(nn.Linear(reg_dim, hidden_dim * 2), nn.ReLU(),
+                                           nn.Linear(hidden_dim * 2, hidden_dim), nn.ReLU(),
+                                           nn.Linear(hidden_dim, output_dim))
+
+    # def forward(self, target_belief, agent):
+    #     agent_batch_size, agent_set_size, agent_input_dim = agent.shape
+    #     agent_reshaped = agent.view(-1, agent_input_dim)
+    #
+    #     batch_size, set_size, input_dim = target_belief.shape
+    #     target_belief_reshaped = target_belief.view(-1, input_dim)
+    #
+    #     agent_rep = self.agent_embedding(agent_reshaped)
+    #     agent_rep = self.phi_func(agent_rep)
+    #     agent_rep = agent_rep.view(agent_batch_size, agent_set_size, -1)
+    #
+    #     target_rep = self.phi_func(target_belief_reshaped)
+    #     target_rep = target_rep.view(batch_size, set_size, -1)
+    #     # sum_pooled = torch.cat((target_rep.sum(dim=1), agent_reshaped), dim=1)
+    #     sum_pooled = torch.cat((target_rep, agent_rep), dim=1).sum(dim=1)
+    #     return self.regressor(sum_pooled)
 
     def forward(self, target_belief, agent):
-        agent_batch_size, agent_set_size, agent_input_dim = agent.shape
-        agent_reshaped = agent.view(-1, agent_input_dim)
-
         batch_size, set_size, input_dim = target_belief.shape
         target_belief_reshaped = target_belief.view(-1, input_dim)
-
-        agent_rep = self.agent_embedding(agent_reshaped)
-        agent_rep = self.phi_func(agent_rep)
-        agent_rep = agent_rep.view(agent_batch_size, agent_set_size, -1)
-
         target_rep = self.phi_func(target_belief_reshaped)
         target_rep = target_rep.view(batch_size, set_size, -1)
-        # sum_pooled = torch.cat((target_rep.sum(dim=1), agent_reshaped), dim=1)
-        sum_pooled = torch.cat((target_rep, agent_rep), dim=1).sum(dim=1)
+        sum_pooled = target_rep.sum(dim=1)
         return self.regressor(sum_pooled)
 
 

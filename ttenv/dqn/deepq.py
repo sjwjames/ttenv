@@ -29,7 +29,7 @@ LR = 1e-4
 
 
 class DQNAgent:
-    def __init__(self, model, target_model, num_actions, device='cpu'):
+    def __init__(self, model, target_model, num_actions, device):
         """Initialize Deep Q-Network agent.
         
         Parameters
@@ -40,7 +40,7 @@ class DQNAgent:
             The target Q-Network model
         num_actions: int
             Number of possible actions
-        device: str
+        device: torch.device
             PyTorch device to use ('cpu' or 'cuda')
         """
         self.device = device
@@ -129,7 +129,7 @@ class DQNAgent:
 
 
 class PFDQNAgent:
-    def __init__(self, model, target_model, num_actions, device='cpu'):
+    def __init__(self, model, target_model, num_actions, device):
         """Initialize Deep Q-Network agent.
 
         Parameters
@@ -140,7 +140,7 @@ class PFDQNAgent:
             The target Q-Network model
         num_actions: int
             Number of possible actions
-        device: str
+        device: torch.device
             PyTorch device to use ('cpu' or 'cuda')
         """
         self.device = device
@@ -170,6 +170,7 @@ class PFDQNAgent:
             return np.random.randint(self.num_actions)
         target_belief = observations["target"]
         agent_info = observations["agent"]
+        # todo: pure greedy, seems not called but tested before, can be deleted
         if "env" in kwargs:
             env = kwargs["env"]
             action_map = env.action_map
@@ -261,7 +262,7 @@ class ActWrapper:
         
         Parameters
         ----------
-        agent: DQNAgent
+        agent: DQNAgent/PFDQNAgent/BayesianDQNAgent
             DQN agent
         act_params: dict
             Parameters for the act function
@@ -307,6 +308,9 @@ class ActWrapper:
         """
         with open(path, "rb") as f:
             agent, act_params = cloudpickle.load(f)
+            if act_params_new:
+                for (k, v) in act_params_new.items():
+                    act_params[k] = v
             return ActWrapper(agent, act_params)
         # if act_params_new:
         #     for (k, v) in act_params_new.items():
@@ -414,9 +418,12 @@ def learn(env,
           test_eps=0.05,
           gpu_memory=1.0,
           render=False,
-          device='cuda' if torch.cuda.is_available() else 'cpu',
+          device="cuda" if torch.cuda.is_available() else
+          "mps" if torch.backends.mps.is_available() else
+          "cpu",
           particle_belief=False,
-          reuse_last_init=False):
+          reuse_last_init=False,
+          blocked=False):
     """Train a Deep Q-Network model.
     
     Parameters
@@ -487,6 +494,10 @@ def learn(env,
         PyTorch device to use
     particle_belief: bool
         If using particle belief
+    reuse_last_init: bool
+        If reuse the initialization pose all the time
+    blocked: bool
+        If the initialized target is blocked
     Returns
     -------
     act: ActWrapper
@@ -494,7 +505,9 @@ def learn(env,
     """
     # Create optimizers
     observation_shape = env.observation_space.shape
-
+    device = torch.device(
+        device
+    )
     # Create target model
     model = q_func(env.action_space.n).to(device)
     target_model = q_func(env.action_space.n).to(device)
@@ -612,10 +625,13 @@ def learn(env,
         return (loss * weights).mean().item()
 
     # Create the schedule for exploration
-    exploration = np.linspace(1.0, exploration_final_eps, int(exploration_fraction * max_timesteps))
-    # exploration = np.array([EPS_END + (EPS_START - EPS_END) * math.exp(-1. * steps_done / EPS_DECAY) for steps_done in
-    #                         range(max_timesteps)])
-    # exploration = np.array([.1] * max_timesteps)
+    exploration = np.ones(max_timesteps)
+    exploration[learning_starts + 1:] = np.linspace(1.0, exploration_final_eps, max_timesteps - (learning_starts + 1))
+    # steps_left = max_timesteps - (learning_starts + 1)
+    # exploration[learning_starts + 1:] = np.array(
+    #     [exploration_final_eps + (1.0 - exploration_final_eps) * math.exp(-1. * steps_done / EPS_DECAY) for steps_done
+    #      in
+    #      range(steps_left)])
 
     # Initialize the parameters and copy them to the target network
     agent.update_target_network()
@@ -638,6 +654,9 @@ def learn(env,
     t = 0
     episode_rewards_history = []
     eval_steps = 1 * epoch_steps
+    eval_returns = [[], [], []]
+    eval_check = checkpoint_freq // epoch_steps
+    eval_episodes = 10
     episode_discovery_rate_dist = []
     lin_dist_range_a2b = METADATA["lin_dist_range_a2b"]
     lin_dist_range_b2t = METADATA["lin_dist_range_b2t"]
@@ -670,35 +689,61 @@ def learn(env,
 
         # Update observation
         obs = next_obs
-        if num_episodes % (checkpoint_freq // epoch_steps) == 0:
-            rollout_dir = os.path.join(save_dir, str(num_episodes) + "_eval_rollout/")
-            if not os.path.exists(rollout_dir):
-                os.makedirs(rollout_dir)
-            env.render(log_dir=rollout_dir)
+
         # End of episode
         if done:
             # Update episode statistics
-            num_episodes += 1
+
             episode_rewards.append(episode_reward)
             episode_rewards_history.append(episode_reward)
             episode_discovery_rate_dist.append([dr / epoch_steps for dr in env.discover_cnt])
-            # temp code, for binary reward
-            if num_episodes % 100 == 0 and np.mean(episode_rewards) > 90.0:
-                # env.init_pose["targets"][0][0] = np.clip(env.init_pose["targets"][0][0] + 1, env.MAP.mapmin[0],
-                #                                          env.MAP.mapmax[0] - 1.0)
-                # env.init_pose["targets"][0][1] = np.clip(env.init_pose["targets"][0][1] + 1, env.MAP.mapmin[1],
-                #                                          env.MAP.mapmax[1] - 1.0)
-                add_times += 1
-                lin_dist_range_a2b = (lin_dist_range_a2b[0], min(20.0, lin_dist_range_a2b[1] + add_times * 1.0))
-                lin_dist_range_b2t = (lin_dist_range_b2t[0], min(20.0, lin_dist_range_b2t[1] + add_times * 1.0))
-                ang_dist_range_a2b = (max(-np.pi,ang_dist_range_a2b[0]-add_times*.1),min(np.pi,ang_dist_range_a2b[1]+add_times*.1))
-                speed = min(env.target_speed_limit + .1, 1.0)
-                env.set_limits(target_speed_limit=speed)
-                env.init_pose["targets"][0][2] = speed
-                env.targets[0].limit = env.limit['target']
+            # if num_episodes % (checkpoint_freq // epoch_steps) == 0:
+            if num_episodes % eval_check == 0:
+                rollout_dir = os.path.join(save_dir, str(num_episodes) + "_eval_rollout/")
+                if not os.path.exists(rollout_dir):
+                    os.makedirs(rollout_dir)
+
+                eval_returns[0].append(num_episodes)
+                eval_episode_rewards = []
+                for e_e in range(eval_episodes):
+                    eval_episode_reward = 0
+                    obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,
+                                    lin_dist_range_b2t=lin_dist_range_b2t, ang_dist_range_a2b=ang_dist_range_a2b,
+                                    blocked=blocked)
+                    for t_eval in range(int(eval_steps)):
+                        action = act(obs, stochastic=True, update_eps=0.0)
+
+                        # Execute action and observe next state
+                        next_obs, reward, terminated, truncated, info = env.step(action)
+                        eval_episode_reward += reward
+                        obs = next_obs
+                        if e_e == eval_episodes - 1:
+                            env.render(log_dir=rollout_dir)
+                    eval_episode_rewards.append(eval_episode_reward)
+                eval_returns[1].append(np.mean(eval_episode_rewards))
+                eval_returns[2].append(np.std(eval_episode_rewards))
+            # temp code, for training
+            # if num_episodes % 100 == 0 and np.mean(episode_discovery_rate_dist[-100:]) > .8:
+            #     if reuse_last_init:
+            #         env.init_pose["targets"][0][0] = np.clip(env.init_pose["targets"][0][0] + 1, env.MAP.mapmin[0],
+            #                                                  env.MAP.mapmax[0] - 1.0)
+            #         env.init_pose["targets"][0][1] = np.clip(env.init_pose["targets"][0][1] + 1, env.MAP.mapmin[1],
+            #                                                  env.MAP.mapmax[1] - 1.0)
+            #     add_times += 1
+            #     lin_dist_range_a2b = (lin_dist_range_a2b[0], min(20.0, lin_dist_range_a2b[1] + add_times * 1.0))
+            #     lin_dist_range_b2t = (lin_dist_range_b2t[0], min(20.0, lin_dist_range_b2t[1] + add_times * 1.0))
+            #     ang_dist_range_a2b = (
+            #         max(-np.pi, ang_dist_range_a2b[0] - add_times * .1),
+            #         min(np.pi, ang_dist_range_a2b[1] + add_times * .1))
+            #     speed = min(env.target_speed_limit + 1.0, 3.0)
+            #     env.set_limits(target_speed_limit=speed)
+            #     env.init_pose["targets"][0][2] = speed
+            #     env.targets[0].limit = env.limit['target']
+            num_episodes += 1
             # Reset environment
             obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,
-                            lin_dist_range_b2t=lin_dist_range_b2t)
+                            lin_dist_range_b2t=lin_dist_range_b2t, ang_dist_range_a2b=ang_dist_range_a2b,
+                            blocked=blocked)
             episode_reward = 0
             episode_step = 0
 
@@ -732,17 +777,15 @@ def learn(env,
             cloudpickle.dump(env.init_pose, f)
     # plt.plot(np.arange(0,num_episodes),episode_last_step_dist)
     # plt.savefig(os.path.join(save_dir, "last step distance.png"))
-    # if np.mean(episode_rewards)>saved_mean_reward:
-    #     act.save(checkpoint_path)
-    act.save(checkpoint_path)
+    if np.mean(episode_rewards) > saved_mean_reward:
+        act.save(checkpoint_path)
     print(np.sum([float(sum(dr) > 0) for dr in episode_discovery_rate_dist[-100:]]) / 100.0)
-    print(episode_rewards_history)
-    np.savetxt(save_dir + "_returns.csv", episode_rewards_history, delimiter=',')
+    np.savetxt(save_dir + "eval_returns.csv", eval_returns[1], delimiter=',')
     fig = plt.figure()
     ax = fig.subplots()
-    ax.plot(np.arange(0, num_episodes), episode_rewards_history)
+    ax.errorbar(eval_returns[0], eval_returns[1], yerr=eval_returns[2], fmt='-x', color='g', capsize=5)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Return")
-    plt.savefig(os.path.join(save_dir, "_returns.png"))
+    plt.savefig(os.path.join(save_dir, "eval_returns.png"))
     plt.close(fig)
     return act

@@ -58,10 +58,10 @@ class CirclePolicy():
         w = util.wrap_around(np.arctan2(y - odom[1], x - odom[0]) - odom[2])/self.sampling_period
         return np.clip(np.array([v,w]), self.limit[0], self.limit[1])
 
-    def collision(self):
+    def collision(self,state):
         self.d_th = -self.d_th
 
-    def reset(self):
+    def reset(self,init_state):
         self.d_th = np.random.random()*np.pi
 
 class ConstantPolicy():

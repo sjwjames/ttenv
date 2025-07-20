@@ -121,7 +121,7 @@ class MinSegmentTree(SegmentTree):
 
 
 class ReplayBuffer:
-    def __init__(self, size, device='cpu'):
+    def __init__(self, size, device):
         """Create Replay buffer.
 
         Parameters
@@ -129,7 +129,7 @@ class ReplayBuffer:
         size: int
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
-        device: str
+        device: torch.device
             PyTorch device to store tensors on
         """
         self._storage = []
@@ -212,7 +212,7 @@ class ReplayBuffer:
 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
-    def __init__(self, size, alpha, device='cpu'):
+    def __init__(self, size, alpha, device):
         """Create Prioritized Replay buffer.
 
         Parameters
@@ -223,7 +223,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         alpha: float
             how much prioritization is used
             (0 - no prioritization, 1 - full prioritization)
-        device: str
+        device: torch.device
             PyTorch device to store tensors on
 
         See Also
@@ -338,7 +338,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
 
 class ParticleBeliefReplayBuffer(ReplayBuffer):
-    def __init__(self, size, device='cpu'):
+    def __init__(self, size, device):
         """Create Replay buffer.
 
         Parameters
@@ -346,7 +346,7 @@ class ParticleBeliefReplayBuffer(ReplayBuffer):
         size: int
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
-        device: str
+        device: torch.device
             PyTorch device to store tensors on
         """
         super().__init__(size, device)

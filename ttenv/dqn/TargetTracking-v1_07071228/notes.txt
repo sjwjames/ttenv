@@ -1,0 +1,1 @@
+fixed init pose and speed limit 3, 10k epochs

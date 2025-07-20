@@ -1,0 +1,1 @@
+5k epoch, init speed 3

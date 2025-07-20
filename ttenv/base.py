@@ -43,6 +43,7 @@ class TargetTrackingBase(gym.Env):
         self.sensor_r = METADATA['sensor_r']
         self.fov = METADATA['fov']
 
+
         map_dir_path = '/'.join(map_utils.__file__.split('/')[:-1])
         if 'dynamic_map' in map_name :
             self.MAP = DynamicMap(
@@ -61,6 +62,7 @@ class TargetTrackingBase(gym.Env):
         self.reset_num = 0
         self.init_pose = []
         self.discover_cnt = [0 for _ in range(self.num_targets)]
+        self.agent_target_dist = [[] for _ in range(self.num_targets)]
 
     def reset(self, **kwargs):
         self.MAP.generate_map(**kwargs)
@@ -68,6 +70,7 @@ class TargetTrackingBase(gym.Env):
         self.state = []
         self.num_collisions = 0
         self.discover_cnt = [0 for _ in range(self.num_targets)]
+        self.agent_target_dist = [[] for _ in range(self.num_targets)]
 
         if "init_pose_list" in kwargs and kwargs["init_pose_list"]:
             self.init_pose = kwargs["init_pose_list"]
@@ -90,6 +93,8 @@ class TargetTrackingBase(gym.Env):
                 self.targets[i].update(self.agent.state[:2])
 
         self.last_est_dists = [np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for bf in self.belief_targets]
+        for i in range(self.num_targets):
+            self.agent_target_dist[i].append(np.linalg.norm(np.array(self.targets[i].state[:2]) - np.array(self.agent.state[:2])))
         self.last_ents = [bf.entropy() for bf in self.belief_targets]
         # The targets are observed by the agent (z_t+1) and the beliefs are updated.
         observed = self.observe_and_update_belief()

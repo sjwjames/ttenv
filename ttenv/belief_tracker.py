@@ -14,6 +14,7 @@ from filterpy.kalman import JulierSigmaPoints, UnscentedKalmanFilter, ExtendedKa
 
 from ttenv.base_model import ParticleDist, LinearGaussianDistribution, GMMDist, batch_mvnorm_logpdf, \
     batch_mvnorm_logpdf_multi_cov
+from ttenv.metadata import METADATA
 
 REG_PARAM = 1e-9
 
@@ -221,7 +222,7 @@ class UKFbelief(object):
 
 class PFbelief(object):
     def __init__(self, dim, limit, transition_func, n, effective_n, dim_z=2,
-                 obs_noise_func=None, collision_func=None):
+                 obs_noise_func=None, collision_func=None, obs_check_func=None, sampling_period=0.5):
         self.dim = dim
         self.dim_z = dim_z
         self.limit = limit
@@ -231,17 +232,22 @@ class PFbelief(object):
         self.transition_func = transition_func
         self.collision_func = collision_func
         self.obs_noise_func = obs_noise_func
+        self.obs_check_func = obs_check_func
+        self.sampling_period = sampling_period
 
-    def reset(self,prior_dist):
+    def reset(self, prior_dist):
         self.states = prior_dist.sample(self.n)
-        # self.states = np.clip(self.states,self.limit[0],self.limit[1])
+        # if self.collision_func(np.dot(self.weights, self.states)):
+        #     self.states = [self.collision_deviation(p) for p in self.states]
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.weights = np.array([1 / self.n] * self.n)
         self.state, self.cov = self.calculate_bs_moments()
-
 
     def predict(self):
         self.states = self.transition_func.sample(self.states, self.n)
         # self.states = np.array([np.matmul(self.transition_func.coefficient,state) for state in self.states])
+        # if self.collision_func(np.dot(self.weights, self.states)):
+        #     self.states = [self.collision_deviation(p) for p in self.states]
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -283,6 +289,8 @@ class PFbelief(object):
 
         self.weights = weights_new
         self.states = next_state_samples
+        # if self.collision_func(np.dot(weights_new, next_state_samples)):
+        #     self.states = [self.collision_deviation(p) for p in next_state_samples]
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -321,4 +329,52 @@ class PFbelief(object):
         # agg_weights = list(agg.values())
         # return -np.dot(agg_weights, np.log(agg_weights))
 
+    def collision_deviation(self, state):
+        new_state = self.collision_control(state)
+        if self.obs_check_func is not None:
+            del_vx, del_vy = self.obstacle_detour_maneuver(new_state,
+                                                           r_margin=METADATA[
+                                                                        'target_speed_limit'] * self.sampling_period * 2)
+            new_state[2] += del_vx
+            new_state[3] += del_vy
+        return new_state
 
+    def collision_control(self, state):
+        """
+        Assigns a new velocity deviating the agent with an angle (pi/2, pi) from
+        the closest obstacle point.
+        """
+        odom = [state[0], state[1], np.arctan2(state[3], state[2])]
+        obs_pos = self.obs_check_func(odom)
+        v = np.sqrt(np.sum(np.square(state[2:]))) + np.random.normal(0.0, 1.0)
+        if obs_pos[1] >= 0:
+            th = obs_pos[1] - (1 + np.random.random()) * np.pi / 2
+        else:
+            th = obs_pos[1] + (1 + np.random.random()) * np.pi / 2
+
+        state_new = np.array([state[0], state[1], v * np.cos(th + odom[2]), v * np.sin(th + odom[2])])
+        return state_new
+
+    def obstacle_detour_maneuver(self, state, r_margin=1.0):
+        """
+        Returns del_vx, del_vy which will be added to the new state.
+        This provides a repultive force from the closest obstacle point based
+        on the current velocity, a linear distance, and an angular distance.
+
+        Parameters:
+        ----------
+        r_margin : float. A margin from an obstalce that you want to consider
+        as the minimum distance the target can get close to the obstacle.
+        """
+        odom = [state[0], state[1], np.arctan2(state[3], state[2])]
+        obs_pos = self.obs_check_func(odom)
+        speed = np.sqrt(np.sum(state[2:] ** 2))
+        rot_ang = np.pi / 2 * (1. + 1. / (1. + np.exp(-(speed - 0.5 * METADATA['target_speed_limit']))))
+        if obs_pos is not None:
+            acc = max(0.0, speed * np.cos(obs_pos[1])) / max(METADATA['margin2wall'], obs_pos[0] - r_margin)
+            th = obs_pos[1] - rot_ang if obs_pos[1] >= 0 else obs_pos[1] + rot_ang
+            del_vx = acc * np.cos(th + odom[2]) * self.sampling_period
+            del_vy = acc * np.sin(th + odom[2]) * self.sampling_period
+            return del_vx, del_vy
+        else:
+            return 0., 0.

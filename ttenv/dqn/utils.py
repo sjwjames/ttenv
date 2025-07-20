@@ -4,6 +4,31 @@ import torch
 # ================================================================
 # Saving variables
 # ================================================================
+def linear_schedule(initial_value, final_value, final_step):
+    """Linear schedule for exploration rate.
+
+    Parameters
+    ----------
+    initial_value: float
+        Initial value of the schedule
+    final_value: float
+        Final value of the schedule
+    final_step: int
+        Step at which the schedule reaches its final value
+
+    Returns
+    -------
+    schedule: function
+        A function that takes a step and returns the current value
+    """
+
+    def schedule(step):
+        """Returns the current value of the schedule."""
+        if step >= final_step:
+            return final_value
+        return initial_value + (final_value - initial_value) * step / final_step
+
+    return schedule
 
 def load_state(path):
     """Load model state from file.

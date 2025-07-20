@@ -13,6 +13,8 @@ import ttenv
 from models import get_mlp_model, get_deepsetmlp_model
 from deepq import learn, load
 from logger import Logger
+from ttenv.dqn import deepadfq
+from ttenv.metadata import METADATA
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--env', help='environment ID', default='TargetTracking-v1')
@@ -55,6 +57,13 @@ parser.add_argument('--num_particles', type=int, default=1000)
 parser.add_argument('--im_size', type=int, default=28)
 parser.add_argument('--particle_belief', type=int, default=0)
 parser.add_argument('--reuse_last_init', type=int, default=0)
+parser.add_argument('--act_policy', choices=['egreedy', 'bayesian'], default='egreedy')
+parser.add_argument('--alg', choices=['adfq', 'adfq-v2'], default='adfq')
+parser.add_argument('--scope', type=str, default='deepadfq')
+parser.add_argument('--varth', type=float, default=1e-10)
+parser.add_argument('--noise', type=float, default=1.0)
+parser.add_argument('--blocked', type=bool, default=False)
+
 args = parser.parse_args()
 
 
@@ -99,51 +108,94 @@ def train(seed, save_dir):
         # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
         #                                 env.env.agent.dim + 2 + args.nb_targets)
 
-        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets)
+        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets+env.env.agent.dim)
 
         # model_fn = get_deepsetmlp_model((1 + 2) * args.nb_targets,
         #                                 env.env.agent.dim)
-
-    act = learn(
-        env,
-        q_func=model_fn,
-        lr=args.learning_rate,
-        lr_decay_factor=args.learning_rate_decay_factor,
-        lr_growth_factor=args.learning_rate_growth_factor,
-        max_timesteps=args.nb_train_steps,
-        buffer_size=args.buffer_size,
-        batch_size=args.batch_size,
-        exploration_fraction=args.eps_fraction,
-        exploration_final_eps=args.eps_min,
-        target_network_update_freq=args.target_update_freq,
-        print_freq=10,
-        checkpoint_freq=args.checkpoint_freq,
-        checkpoint_path=os.path.join(save_dir_0, "model.pkl"),
-        learning_starts=args.nb_warmup_steps,
-        gamma=args.gamma,
-        prioritized_replay=bool(args.prioritized),
-        prioritized_replay_alpha=args.prioritized_replay_alpha,
-        callback=None,
-        double_q=bool(args.double_q),
-        epoch_steps=args.nb_epoch_steps,
-        eval_logger=Logger(args.env,
-                           env_type='target_tracking',
-                           save_dir=save_dir_0,
-                           render=bool(args.render),
-                           figID=1,
-                           ros=bool(args.ros),
-                           map_name=args.map,
-                           num_targets=args.nb_targets,
-                           eval_type=args.eval_type,
-                           init_file_path=args.init_file_path),
-        save_dir=save_dir_0,
-        test_eps=args.test_eps,
-        gpu_memory=args.gpu_memory,
-        render=(bool(args.render) or bool(args.ros)),
-        device=args.device,
-        particle_belief=args.particle_belief,
-        reuse_last_init=args.reuse_last_init
-    )
+    if args.act_policy == "egreedy":
+        act = learn(
+            env,
+            q_func=model_fn,
+            lr=args.learning_rate,
+            lr_decay_factor=args.learning_rate_decay_factor,
+            lr_growth_factor=args.learning_rate_growth_factor,
+            max_timesteps=args.nb_train_steps,
+            buffer_size=args.buffer_size,
+            batch_size=args.batch_size,
+            exploration_fraction=args.eps_fraction,
+            exploration_final_eps=args.eps_min,
+            target_network_update_freq=args.target_update_freq,
+            print_freq=10,
+            checkpoint_freq=args.checkpoint_freq,
+            checkpoint_path=os.path.join(save_dir_0, "model.pkl"),
+            learning_starts=args.nb_warmup_steps,
+            gamma=args.gamma,
+            prioritized_replay=bool(args.prioritized),
+            prioritized_replay_alpha=args.prioritized_replay_alpha,
+            callback=None,
+            double_q=bool(args.double_q),
+            epoch_steps=args.nb_epoch_steps,
+            eval_logger=Logger(args.env,
+                               env_type='target_tracking',
+                               save_dir=save_dir_0,
+                               render=bool(args.render),
+                               figID=1,
+                               ros=bool(args.ros),
+                               map_name=args.map,
+                               num_targets=args.nb_targets,
+                               eval_type=args.eval_type,
+                               init_file_path=args.init_file_path),
+            save_dir=save_dir_0,
+            test_eps=args.test_eps,
+            gpu_memory=args.gpu_memory,
+            render=(bool(args.render) or bool(args.ros)),
+            device=args.device,
+            particle_belief=args.particle_belief,
+            reuse_last_init=args.reuse_last_init,
+            blocked = args.blocked
+        )
+    else:
+        act = deepadfq.learn(
+            env,
+            q_func=model_fn,
+            lr=args.learning_rate,
+            lr_decay_factor=args.learning_rate_decay_factor,
+            lr_growth_factor=args.learning_rate_growth_factor,
+            max_timesteps=args.nb_train_steps,
+            buffer_size=args.buffer_size,
+            batch_size=args.batch_size,
+            exploration_fraction=args.eps_fraction,
+            exploration_final_eps=args.eps_min,
+            target_network_update_freq=args.target_update_freq,
+            checkpoint_freq=args.checkpoint_freq,
+            learning_starts=args.nb_warmup_steps,
+            gamma=args.gamma,
+            prioritized_replay=bool(args.prioritized),
+            prioritized_replay_alpha=args.prioritized_replay_alpha,
+            callback=None,
+            alg=args.alg,
+            scope=args.scope,
+            sdMin=np.sqrt(args.varth),
+            noise=args.noise,
+            act_policy=args.act_policy,
+            epoch_steps=args.nb_epoch_steps,
+            reuse_last_init=args.reuse_last_init,
+            eval_logger=Logger(args.env,
+                               env_type='target_tracking',
+                               save_dir=save_dir_0,
+                               render=bool(args.render),
+                               figID=1,
+                               ros=bool(args.ros),
+                               map_name=args.map,
+                               num_targets=args.nb_targets,
+                               im_size=args.im_size,
+                               eval_type=args.eval_type,
+                               init_file_path=args.init_file_path),
+            save_dir=save_dir_0,
+            test_eps=args.test_eps,
+            gpu_memory=args.gpu_memory,
+            render=(bool(args.render) or bool(args.ros))
+        )
 
     print("Saving model to model.pkl")
     act.save(os.path.join(save_dir_0, "model.pkl"))
@@ -182,32 +234,39 @@ def test():
     ep_nlogdetcov = ['Episode nLogDetCov']
     time_elapsed = ['Elapsed Time (sec)']
     given_init_pose, test_init_pose = [], []
-
+    episode_discovery_rate_dist = []
+    episode_agent_target_dist = []
     # Use a fixed set of initial positions if given
-    if args.init_file_path != '.':
+    if args.init_file_path != '.' and args.reuse_last_init:
         import pickle
         given_init_pose = pickle.load(open(args.init_file_path, "rb"))
-
+    test_directory_path = args.log_dir + 'test/'
+    os.makedirs(test_directory_path, exist_ok=True)
     while (ep < args.nb_test_steps):  # test episode
         ep += 1
         episode_rew, nlogdetcov = 0, 0
-        if args.particle_belief:
-            obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-            test_init_pose.append({'agent': env.agent.state,
-                                   'targets': [env.targets[i].state for i in range(args.nb_targets)],
-                                   'belief_targets': [env.belief_targets[i].state for i in
-                                                      range(args.nb_targets)]})
-        else:
-            obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-            test_init_pose.append({'agent': env.agent.state,
-                                   'targets': [env.targets[i].state for i in range(args.nb_targets)],
-                                   'belief_targets': [env.belief_targets[i].state for i in
-                                                      range(args.nb_targets)]})
+        # if args.particle_belief:
+        #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
+        #     test_init_pose.append({'agent': env.agent.state,
+        #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
+        #                            'belief_targets': [env.belief_targets[i].state for i in
+        #                                               range(args.nb_targets)]})
+        # else:
+        #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
+        #     test_init_pose.append({'agent': env.agent.state,
+        #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
+        #                            'belief_targets': [env.belief_targets[i].state for i in
+        #                                               range(args.nb_targets)]})
+        obs, terminated, truncated = env.reset(init_pose_list=given_init_pose,blocked=args.blocked), False, False
+        test_init_pose.append({'agent': env.agent.state,
+                               'targets': [env.targets[i].state for i in range(args.nb_targets)],
+                               'belief_targets': [env.belief_targets[i].state for i in
+                                                  range(args.nb_targets)]})
         s_time = time.time()
 
         while not terminated and not truncated:
             if args.render:
-                env.render(log_dir=args.log_dir)
+                env.render(log_dir=test_directory_path)
             # if args.ros_log:
             #     ros_log.log(env)
             action = act(obs, stochastic=False)
@@ -215,11 +274,16 @@ def test():
             obs = next_obs
             episode_rew += rew
             nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
-
+        episode_discovery_rate_dist.append(np.mean([dr / args.nb_epoch_steps for dr in env.discover_cnt]))
+        episode_agent_target_dist.append(np.mean(env.agent_target_dist,axis=0))
         time_elapsed.append(time.time() - s_time)
         ep_nlogdetcov.append(nlogdetcov)
         print(f"Ep.{ep} - Episode reward: {episode_rew:.2f}, Episode nLogDetCov: {nlogdetcov:.2f}")
 
+    np.savetxt(os.path.join(test_directory_path, 'discovery_' + str(METADATA["target_speed_limit"]) + '.csv'),
+               np.array(np.round(episode_discovery_rate_dist, 4)), delimiter=",")
+    np.savetxt(os.path.join(test_directory_path, 'distance_' + str(METADATA["target_speed_limit"]) + '.csv'),
+               np.array(np.round(episode_agent_target_dist, 4)), delimiter=",")
     if args.record:
         env.moviewriter.finish()
     # if args.ros_log:

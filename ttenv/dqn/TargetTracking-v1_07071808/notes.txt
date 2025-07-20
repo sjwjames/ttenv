@@ -1,0 +1,1 @@
+random init pose, speed limit 3.0, 10k epoch, binary reward with collision penalty
