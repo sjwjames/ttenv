@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import animation
 
-from ttenv.metadata import METADATA
+from ttenv.metadata import METADATA, LEAKAGE_OBS
 
 
 class Display2D(Wrapper):
@@ -146,23 +146,26 @@ class Display2D(Wrapper):
                         fill=False, edgecolor='b')
                     ax.add_patch(local_rect)
 
-            sensor_arc = patches.Arc((state[0], state[1]), METADATA['sensor_r'] * 2, METADATA['sensor_r'] * 2,
-                                     angle=state[2] / np.pi * 180, theta1=-METADATA['fov'] / 2,
-                                     theta2=METADATA['fov'] / 2, facecolor='gray')
-            ax.add_patch(sensor_arc)
-            ax.plot(
-                [state[0], state[0] + METADATA['sensor_r'] * np.cos(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
-                [state[1], state[1] + METADATA['sensor_r'] * np.sin(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
-                'k', linewidth=0.5)
-            ax.plot(
-                [state[0], state[0] + METADATA['sensor_r'] * np.cos(state[2] - 0.5 * METADATA['fov'] / 180.0 * np.pi)],
-                [state[1], state[1] + METADATA['sensor_r'] * np.sin(state[2] - 0.5 * METADATA['fov'] / 180.0 * np.pi)],
-                'k', linewidth=0.5)
+            if self.env_core.observation_model != LEAKAGE_OBS:
+                sensor_arc = patches.Arc((state[0], state[1]), METADATA['sensor_r'] * 2, METADATA['sensor_r'] * 2,
+                                         angle=state[2] / np.pi * 180, theta1=-METADATA['fov'] / 2,
+                                         theta2=METADATA['fov'] / 2, facecolor='gray')
+                ax.add_patch(sensor_arc)
+                ax.plot(
+                    [state[0], state[0] + METADATA['sensor_r'] * np.cos(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
+                    [state[1], state[1] + METADATA['sensor_r'] * np.sin(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
+                    'k', linewidth=0.5)
+                ax.plot(
+                    [state[0], state[0] + METADATA['sensor_r'] * np.cos(state[2] - 0.5 * METADATA['fov'] / 180.0 * np.pi)],
+                    [state[1], state[1] + METADATA['sensor_r'] * np.sin(state[2] - 0.5 * METADATA['fov'] / 180.0 * np.pi)],
+                    'k', linewidth=0.5)
 
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 5.,
                     'v_target:%.2f' % np.sqrt(np.sum(self.env_core.targets[0].state[2:] ** 2)))
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 10., 'v_agent:%.2f' % self.env_core.agent.vw[0])
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 15., 'w_agent:%.2f' % self.env_core.agent.vw[1])
+            if self.env_core.observation_model == LEAKAGE_OBS:
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 20., 'obs:%.2f' % np.sum([self.env_core.observation(target)[1] for target in self.targets]))
             ax.set_xlim((self.mapmin[0], self.mapmax[0]))
             ax.set_ylim((self.mapmin[1], self.mapmax[1]))
             ax.set_title("Trajectory %d" % self.traj_num)

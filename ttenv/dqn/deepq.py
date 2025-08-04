@@ -656,7 +656,7 @@ def learn(env,
     eval_steps = 1 * epoch_steps
     eval_returns = [[], [], []]
     eval_check = checkpoint_freq // epoch_steps
-    eval_episodes = 10
+    eval_episodes = 1
     episode_discovery_rate_dist = []
     lin_dist_range_a2b = METADATA["lin_dist_range_a2b"]
     lin_dist_range_b2t = METADATA["lin_dist_range_b2t"]
@@ -780,7 +780,7 @@ def learn(env,
     if np.mean(episode_rewards) > saved_mean_reward:
         act.save(checkpoint_path)
     print(np.sum([float(sum(dr) > 0) for dr in episode_discovery_rate_dist[-100:]]) / 100.0)
-    np.savetxt(save_dir + "eval_returns.csv", eval_returns[1], delimiter=',')
+    np.savetxt(save_dir + "_eval_returns.csv", np.array(eval_returns), delimiter=',')
     fig = plt.figure()
     ax = fig.subplots()
     ax.errorbar(eval_returns[0], eval_returns[1], yerr=eval_returns[2], fmt='-x', color='g', capsize=5)

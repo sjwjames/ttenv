@@ -14,7 +14,7 @@ from models import get_mlp_model, get_deepsetmlp_model
 from deepq import learn, load
 from logger import Logger
 from ttenv.dqn import deepadfq
-from ttenv.metadata import METADATA
+from ttenv.metadata import METADATA, LEAKAGE_OBS, GAUSSIAN_OBS, METADATA_v1
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--env', help='environment ID', default='TargetTracking-v1')
@@ -37,7 +37,7 @@ parser.add_argument('--learning_rate_decay_factor', type=float, default=1.0)
 parser.add_argument('--learning_rate_growth_factor', type=float, default=1.0)
 parser.add_argument('--gamma', type=float, default=.99)
 parser.add_argument('--hiddens', type=str, default='64:128:64')
-parser.add_argument('--log_dir', type=str, default='.')
+parser.add_argument('--log_dir', type=str, default='./experiments')
 parser.add_argument('--log_fname', type=str, default='model.pkl')
 parser.add_argument('--eps_fraction', type=float, default=0.1)
 parser.add_argument('--eps_min', type=float, default=.02)
@@ -62,9 +62,11 @@ parser.add_argument('--alg', choices=['adfq', 'adfq-v2'], default='adfq')
 parser.add_argument('--scope', type=str, default='deepadfq')
 parser.add_argument('--varth', type=float, default=1e-10)
 parser.add_argument('--noise', type=float, default=1.0)
-parser.add_argument('--blocked', type=bool, default=False)
+parser.add_argument('--blocked', type=int, default=0)
 
 args = parser.parse_args()
+
+
 
 
 def train(seed, save_dir):
@@ -84,7 +86,8 @@ def train(seed, save_dir):
                      num_targets=args.nb_targets,
                      is_training=True,
                      im_size=args.im_size,
-                     T_steps=args.nb_epoch_steps
+                     T_steps=args.nb_epoch_steps,
+                     n_particles=args.num_particles
                      )
 
     if not args.particle_belief:
@@ -107,11 +110,8 @@ def train(seed, save_dir):
         # 1 for particle weight, 2 for obstacle info, observed info per target
         # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
         #                                 env.env.agent.dim + 2 + args.nb_targets)
+        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets + env.env.agent.dim)
 
-        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets+env.env.agent.dim)
-
-        # model_fn = get_deepsetmlp_model((1 + 2) * args.nb_targets,
-        #                                 env.env.agent.dim)
     if args.act_policy == "egreedy":
         act = learn(
             env,
@@ -152,7 +152,7 @@ def train(seed, save_dir):
             device=args.device,
             particle_belief=args.particle_belief,
             reuse_last_init=args.reuse_last_init,
-            blocked = args.blocked
+            blocked=args.blocked
         )
     else:
         act = deepadfq.learn(
@@ -215,7 +215,8 @@ def test():
                      num_targets=args.nb_targets,
                      is_training=False,
                      im_size=args.im_size,
-                     T_steps=args.nb_epoch_steps
+                     T_steps=args.nb_epoch_steps,
+                     n_particles=args.num_particles
                      )
 
     # timelimit_env = env
@@ -229,71 +230,91 @@ def test():
     #     from ttenv.target_tracking.ros_wrapper import RosLog
     #     ros_log = RosLog(num_targets=args.nb_targets, wrapped_num=args.ros + args.render + args.record + 1)
 
-    ep = 0
-    init_pos = []
-    ep_nlogdetcov = ['Episode nLogDetCov']
-    time_elapsed = ['Elapsed Time (sec)']
-    given_init_pose, test_init_pose = [], []
-    episode_discovery_rate_dist = []
-    episode_agent_target_dist = []
     # Use a fixed set of initial positions if given
-    if args.init_file_path != '.' and args.reuse_last_init:
+
+    seed = args.seed
+    for _ in range(args.repeat):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/"
+        if not args.reuse_last_init:
+            test_directory_path += "random_init/"
+        os.makedirs(test_directory_path, exist_ok=True)
+        ep = 0
+        init_pos = []
+        ep_nlogdetcov = ['Episode nLogDetCov']
+        time_elapsed = ['Elapsed Time (sec)']
+        given_init_pose, test_init_pose = [], []
+        if args.init_file_path != '.' and args.reuse_last_init:
+            import pickle
+            given_init_pose = pickle.load(open(args.init_file_path, "rb"))
+        episode_discovery_rate_dist = []
+        episode_agent_target_dist = []
+        if METADATA["observation_model"]==LEAKAGE_OBS:
+            particle_obs = []
+        while (ep < args.nb_test_steps):  # test episode
+            ep += 1
+            episode_rew, nlogdetcov = 0, 0
+            # if args.particle_belief:
+            #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
+            #     test_init_pose.append({'agent': env.agent.state,
+            #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
+            #                            'belief_targets': [env.belief_targets[i].state for i in
+            #                                               range(args.nb_targets)]})
+            # else:
+            #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
+            #     test_init_pose.append({'agent': env.agent.state,
+            #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
+            #                            'belief_targets': [env.belief_targets[i].state for i in
+            #                                               range(args.nb_targets)]})
+            obs, terminated, truncated = env.reset(init_pose_list=given_init_pose, blocked=args.blocked), False, False
+            test_init_pose.append({'agent': env.agent.state,
+                                   'targets': [env.targets[i].state for i in range(args.nb_targets)],
+                                   'belief_targets': [env.belief_targets[i].state for i in
+                                                      range(args.nb_targets)]})
+            s_time = time.time()
+
+            while not terminated and not truncated:
+                if seed == args.seed:
+                    if args.render:
+                        env.render(log_dir=test_directory_path)
+                # if args.ros_log:
+                #     ros_log.log(env)
+                action = act(obs, stochastic=False)
+                next_obs, rew, terminated, truncated, info = env.step(action)
+                obs = next_obs
+                episode_rew += rew
+                nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
+            episode_discovery_rate_dist.append(np.mean([dr / args.nb_epoch_steps for dr in env.discover_cnt]))
+            episode_agent_target_dist.append(np.mean(env.agent_target_dist, axis=0))
+            if METADATA["observation_model"]==LEAKAGE_OBS:
+                particle_obs.append(env.particles_observed)
+            time_elapsed.append(time.time() - s_time)
+            ep_nlogdetcov.append(nlogdetcov)
+            print(f"Ep.{ep} - Episode reward: {episode_rew:.2f}, Episode nLogDetCov: {nlogdetcov:.2f}")
+
+        np.savetxt(os.path.join(test_directory_path, 'discovery_' + str(METADATA["target_speed_limit"]) + '.csv'),
+                   np.array(np.round(episode_discovery_rate_dist, 4)), delimiter=",")
+        np.savetxt(os.path.join(test_directory_path, 'distance_' + str(METADATA["target_speed_limit"]) + '.csv'),
+                   np.array(np.round(episode_agent_target_dist, 4)), delimiter=",")
+        if METADATA["observation_model"] == LEAKAGE_OBS:
+            np.savetxt(os.path.join(test_directory_path, 'particles_obs_' + str(METADATA["target_speed_limit"]) + '.csv'),
+                       np.array(particle_obs), delimiter=",")
+        if args.record:
+            env.moviewriter.finish()
+        # if args.ros_log:
+        #     ros_log.save(args.log_dir)
+
         import pickle
-        given_init_pose = pickle.load(open(args.init_file_path, "rb"))
-    test_directory_path = args.log_dir + 'test/'
-    os.makedirs(test_directory_path, exist_ok=True)
-    while (ep < args.nb_test_steps):  # test episode
-        ep += 1
-        episode_rew, nlogdetcov = 0, 0
-        # if args.particle_belief:
-        #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-        #     test_init_pose.append({'agent': env.agent.state,
-        #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
-        #                            'belief_targets': [env.belief_targets[i].state for i in
-        #                                               range(args.nb_targets)]})
-        # else:
-        #     obs, terminated, truncated = env.reset(init_pose_list=given_init_pose), False, False
-        #     test_init_pose.append({'agent': env.agent.state,
-        #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
-        #                            'belief_targets': [env.belief_targets[i].state for i in
-        #                                               range(args.nb_targets)]})
-        obs, terminated, truncated = env.reset(init_pose_list=given_init_pose,blocked=args.blocked), False, False
-        test_init_pose.append({'agent': env.agent.state,
-                               'targets': [env.targets[i].state for i in range(args.nb_targets)],
-                               'belief_targets': [env.belief_targets[i].state for i in
-                                                  range(args.nb_targets)]})
-        s_time = time.time()
+        import tabulate
+        pickle.dump(test_init_pose,
+                    open(os.path.join(test_directory_path, str(METADATA["target_speed_limit"]) + '_test_init_pose.pkl'),
+                         'wb'))
+        with open(os.path.join(test_directory_path, str(METADATA["target_speed_limit"]) + '_test_result.txt'),
+                  'w') as f_result:
+            f_result.write(tabulate.tabulate([ep_nlogdetcov, time_elapsed], tablefmt='presto'))
+        seed += 1
 
-        while not terminated and not truncated:
-            if args.render:
-                env.render(log_dir=test_directory_path)
-            # if args.ros_log:
-            #     ros_log.log(env)
-            action = act(obs, stochastic=False)
-            next_obs, rew, terminated, truncated, info = env.step(action)
-            obs = next_obs
-            episode_rew += rew
-            nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
-        episode_discovery_rate_dist.append(np.mean([dr / args.nb_epoch_steps for dr in env.discover_cnt]))
-        episode_agent_target_dist.append(np.mean(env.agent_target_dist,axis=0))
-        time_elapsed.append(time.time() - s_time)
-        ep_nlogdetcov.append(nlogdetcov)
-        print(f"Ep.{ep} - Episode reward: {episode_rew:.2f}, Episode nLogDetCov: {nlogdetcov:.2f}")
-
-    np.savetxt(os.path.join(test_directory_path, 'discovery_' + str(METADATA["target_speed_limit"]) + '.csv'),
-               np.array(np.round(episode_discovery_rate_dist, 4)), delimiter=",")
-    np.savetxt(os.path.join(test_directory_path, 'distance_' + str(METADATA["target_speed_limit"]) + '.csv'),
-               np.array(np.round(episode_agent_target_dist, 4)), delimiter=",")
-    if args.record:
-        env.moviewriter.finish()
-    # if args.ros_log:
-    #     ros_log.save(args.log_dir)
-
-    import pickle
-    import tabulate
-    pickle.dump(test_init_pose, open(os.path.join(args.log_dir, 'test_init_pose.pkl'), 'wb'))
-    with open(os.path.join(args.log_dir, 'test_result.txt'), 'w') as f_result:
-        f_result.write(tabulate.tabulate([ep_nlogdetcov, time_elapsed], tablefmt='presto'))
 
 
 if __name__ == '__main__':

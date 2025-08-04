@@ -2,8 +2,10 @@ from typing import List
 
 import numpy as np
 import torch
+from matplotlib import pyplot as plt
 from scipy.linalg import solve_triangular, cholesky
 from scipy.stats import norm, multivariate_normal
+from scipy.stats import poisson
 
 
 def entropy_multivariate_gaussian(cov_matrix: np.ndarray) -> float:
@@ -263,7 +265,7 @@ class LinearGaussianDistribution:
     def sample(self, x, n):
         if np.ndim(self.noise_mean) > 0:
             if np.ndim(x) == 1:
-                return np.random.multivariate_normal(np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var,
+                return np.random.multivariate_normal(np.matmul(self.coefficient, x) + self.noise_mean, self.noise_var,
                                                      n).squeeze()
             else:
                 return np.array([
@@ -274,13 +276,13 @@ class LinearGaussianDistribution:
 
     def pdf(self, y, x):
         if np.ndim(self.noise_mean) > 0:
-            return multivariate_normal.pdf(y, np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var)
+            return multivariate_normal.pdf(y, np.matmul(self.coefficient, x) + self.noise_mean, self.noise_var)
         else:
             return norm.pdf(y, self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var))
 
     def log_pdf(self, y, x):
         if np.ndim(self.noise_mean) > 0:
-            return multivariate_normal.logpdf(y, np.matmul(self.coefficient,x) + self.noise_mean, self.noise_var)
+            return multivariate_normal.logpdf(y, np.matmul(self.coefficient, x) + self.noise_mean, self.noise_var)
         else:
             return norm.logpdf(y, self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var))
 
@@ -293,7 +295,7 @@ class LinearGaussianDistribution:
             if np.ndim(var_marg) < 1 and np.ndim(mu_marg) == 1:
                 var_marg = np.array([var_marg] * len(mu_marg))
         else:
-            mu_marg = np.matmul(self.coefficient,np.array(x_mean)) + self.noise_mean
+            mu_marg = np.matmul(self.coefficient, np.array(x_mean)) + self.noise_mean
             np_x_var = np.array(x_var)
             # if np_x_var.shape[0] == np_x_var.shape[1]:
             #     var_marg = np.array(self.noise_var) + np.matmul(np.array(
@@ -306,10 +308,9 @@ class LinearGaussianDistribution:
                 self.coefficient).T, np.matmul(self.coefficient, np_x_var))
         return mu_marg, var_marg
 
-
     def compute_marginal_mean(self, x_mean):
         if np.ndim(self.noise_mean) > 0:
-            mu_marg = np.matmul(self.coefficient,x_mean) + self.noise_mean
+            mu_marg = np.matmul(self.coefficient, x_mean.T).T + self.noise_mean
             return mu_marg
         else:
             mu_marg = self.coefficient * np.array(x_mean) + self.noise_mean
@@ -535,3 +536,108 @@ def batch_mvnorm_logpdf_multi_cov(x, mus, Sigmas):
     # 6) final PDF values
     log_pdfs = logCs - 0.5 * sqnorms
     return log_pdfs.numpy()
+
+
+class GasLeakageModel:
+    def __init__(self):
+        self.tau = 1500
+        self.D = 1
+        self.V = 0
+        self.Q0 = 10
+        self.a = 10
+        self.t0 = 0.5
+        self.rate_threshold = 50
+        self.klist = []
+        self.pmf_list = []
+
+    def get_emission_rate(self, agent, target):
+        lam = np.sqrt(self.D * self.tau / (1 + self.V ** 2 * self.tau / (4 * self.D)))
+        # r = self.Q0 / np.log(lam / self.a) * np.exp((agent_coord[0] - target_coord[0]) * self.V / (2 * self.D)) * i0(
+        #     AIAPos.euclid_dist_static(AIAPos(agent_coord), AIAPos(target_coord)) / lam)
+        dist = np.linalg.norm(np.array(agent[:2]) - np.array(target[:2]))
+
+        if dist == 0:
+            r = self.rate_threshold
+        else:
+            r = self.a * self.Q0 / dist * np.exp(-dist / lam) * np.exp(
+                -(target[0] - agent[0]) * self.V / (2 * self.D))
+        r = min(self.rate_threshold, r)
+        return r
+
+    def get_mus(self, agent_coords, target_coords):
+        mu_list = [self.get_mu(a, t) for a, t in zip(agent_coords, target_coords)]
+        return np.array(mu_list)
+
+    def get_mu(self, agent_coord, target_coord):
+        r = self.get_emission_rate(agent_coord, target_coord)
+        mu = r * self.t0
+        return mu
+
+    def generate_sample(self, target_coord, agent_coord):
+        mu = self.get_mu(agent_coord, target_coord)
+        sample = np.random.poisson(mu)
+        return np.array(sample)
+
+    def generate_samples(self, agent_coord, target_coord, n):
+        mu = self.get_mu(agent_coord, target_coord)
+        samples = np.random.poisson(mu, (n, 1))
+        return samples
+
+    def generate_samples_pairwise(self, agent_coords, target_coords):
+        mus = []
+        for a_coord, t_coord in zip(agent_coords, target_coords):
+            mu = self.get_mu(a_coord, t_coord)
+            mus.append(mu)
+        samples = np.random.poisson(mus)
+        return samples.reshape([-1, 1])
+
+    def measurement_llhs(self, agent_coords, target_coords, ys):
+        probs = [poisson(self.get_mu(a_coord, t_coord)).pmf(ys.squeeze()) for a_coord, t_coord in
+                 zip(agent_coords, target_coords)]
+        return probs
+
+    def measurement_log_llhs(self, agent, target_coords, y):
+        log_probs = [poisson(self.get_mu(agent, t_coord)).logpmf(y) for t_coord in
+                     target_coords]
+        return log_probs
+
+    def plot_mu(self, target_pos, x_range, y_range, n):
+        x = np.linspace(x_range[0], x_range[1], n)
+        y = np.linspace(y_range[0], y_range[1], n)
+        xx, yy = np.meshgrid(x, y)
+        positions = np.vstack([xx.ravel(), yy.ravel()]).T
+        mus = [self.get_mu(a, target_pos) for a in positions]
+        plt.contour(xx, yy, np.reshape(mus, [n, n]), levels=20, cmap='inferno')
+        plt.colorbar()
+        plt.title('Gas Leakage Mean Concentration')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.savefig("gas leakage measure mu.png")
+        plt.show()
+
+    def get_entropy(self, agent_coords, target_coords):
+        ents = []
+        for a_coord, t_coord in zip(agent_coords, target_coords):
+            mu = self.get_mu(a_coord, t_coord)
+            ent = poisson(mu).entropy()
+            ents.append(ent)
+        return ents
+
+    def preheat(self):
+        max_lam = self.rate_threshold * self.t0
+        prob_threshold = 0.99
+        klist = []
+        for lam in range(max_lam + 1):
+            low, high = 0, int(lam + 10 * (lam ** 0.5))  # Heuristic for upper bound based on lambda
+            # Perform binary search
+            while low < high:
+                mid = (low + high) // 2
+                cumulative_prob = poisson.cdf(mid, lam)
+
+                if cumulative_prob < prob_threshold:
+                    low = mid + 1  # Move the lower bound up
+                else:
+                    high = mid  # Narrow down to mid
+
+            klist.append(low)
+        self.klist = klist

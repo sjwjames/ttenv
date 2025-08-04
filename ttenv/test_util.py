@@ -1,5 +1,7 @@
 import numpy as np
 import util
+from ttenv.base_model import GasLeakageModel
+
 
 def test_env_util():
     qa = {(1,0):(1,0), (0,1):(1,np.pi/2), (-1,0):(1, np.pi), (0,-1):(1, -np.pi/2)}
@@ -24,4 +26,6 @@ def test_env_util():
 
 if __name__ == "__main__":
     print("TEST ENV_UTIL.PY...")
-    test_env_util()
+    # test_env_util()
+    leakage_model = GasLeakageModel()
+    leakage_model.plot_mu([10,10],[0,50],[0,50],1000)

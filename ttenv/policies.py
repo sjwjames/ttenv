@@ -79,3 +79,19 @@ class ConstantPolicy():
 
     def reset(self, init_state):
         pass
+
+class RepulsivePolicy():
+    def __init__(self,map, noise_cov, lim_vel=2.0):
+        self.noise_cov = noise_cov
+        self.limit = np.array([[-lim_vel, -np.pi/5], [lim_vel, np.pi/5]])
+        self.map = map
+    def get_control(self, state):
+        uv = np.random.multivariate_normal(state[-2:], self.noise_cov)
+        return np.clip(uv, self.limit[0], self.limit[1])
+
+    def collision(self, state):
+        return np.array([state[-2], -state[-1]])
+
+
+    def reset(self, init_state):
+        pass

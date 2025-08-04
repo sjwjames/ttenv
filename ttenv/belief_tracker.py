@@ -13,8 +13,8 @@ import ttenv.util as util
 from filterpy.kalman import JulierSigmaPoints, UnscentedKalmanFilter, ExtendedKalmanFilter
 
 from ttenv.base_model import ParticleDist, LinearGaussianDistribution, GMMDist, batch_mvnorm_logpdf, \
-    batch_mvnorm_logpdf_multi_cov
-from ttenv.metadata import METADATA
+    batch_mvnorm_logpdf_multi_cov, GasLeakageModel
+from ttenv.metadata import METADATA, GAUSSIAN_OBS, LEAKAGE_OBS
 
 REG_PARAM = 1e-9
 
@@ -99,7 +99,7 @@ class UKFbelief(object):
     """
 
     def __init__(self, dim, limit, dim_z=2, fx=None, W=None, obs_noise_func=None,
-                 collision_func=None, sampling_period=0.5, kappa=1):
+                 collision_func=None, sampling_period=0.5, kappa=1, hx=None,measurement_model=GAUSSIAN_OBS):
         """
         dim : dimension of state
             ***Assuming dim==3: (x,y,theta), dim==4: (x,y,xdot,ydot), dim==5: (x,y,theta,v,w)
@@ -117,11 +117,12 @@ class UKFbelief(object):
         self.W = W if W is not None else np.zeros((self.dim, self.dim))
         self.obs_noise_func = obs_noise_func
         self.collision_func = collision_func
-
-        def hx(y, agent_state, measure_func=util.relative_distance_polar):
-            r_pred, alpha_pred = measure_func(y[:2], agent_state[:2],
-                                              agent_state[2])
-            return np.array([r_pred, alpha_pred])
+        self.measurement_model = measurement_model
+        if hx is None:
+            def hx(y, agent_state, measure_func=util.relative_distance_polar):
+                r_pred, alpha_pred = measure_func(y[:2], agent_state[:2],
+                                                  agent_state[2])
+                return np.array([r_pred, alpha_pred])
 
         def x_mean_fn_(sigmas, Wm):
             if dim == 3:
@@ -184,10 +185,14 @@ class UKFbelief(object):
             return r_z
 
         sigmas = JulierSigmaPoints(n=dim, kappa=kappa)
-        self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
-                                         hx=hx, points=sigmas, x_mean_fn=x_mean_fn_,
-                                         z_mean_fn=z_mean_fn_, residual_x=residual_x_,
-                                         residual_z=residual_z_)
+        if measurement_model==GAUSSIAN_OBS:
+            self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
+                                             hx=hx, points=sigmas, x_mean_fn=x_mean_fn_,
+                                             z_mean_fn=z_mean_fn_, residual_x=residual_x_,
+                                             residual_z=residual_z_)
+        elif measurement_model==LEAKAGE_OBS:
+            self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
+                                             hx=hx, points=sigmas)
 
     def reset(self, init_state, init_cov):
         self.state = init_state
@@ -202,15 +207,22 @@ class UKFbelief(object):
                             np.pi * np.random.random() - 0.5 * np.pi])
 
         # Kalman Filter Update
-        self.ukf.predict(u=u_t)
+        if self.measurement_model == LEAKAGE_OBS:
+            self.ukf.predict()
+        else:
+            self.ukf.predict(u=u_t)
         self.cov = self.ukf.P
         self.state = np.clip(self.ukf.x, self.limit[0], self.limit[1])
 
     def update(self, z_t, x_t):
         # Kalman Filter Update
-        r_pred, alpha_pred = util.relative_distance_polar(self.ukf.x[:2], x_t[:2], x_t[2])
-        self.ukf.update(z_t, R=self.obs_noise_func((r_pred, alpha_pred)),
-                        agent_state=x_t)
+
+        if self.measurement_model == LEAKAGE_OBS:
+            self.ukf.update(z_t, R=np.array([0.01]), agent_coord=x_t)
+        else:
+            r_pred, alpha_pred = util.relative_distance_polar(self.ukf.x[:2], x_t[:2], x_t[2])
+            self.ukf.update(z_t, R=self.obs_noise_func((r_pred, alpha_pred)),
+                            agent_state=x_t)
 
         self.cov = self.ukf.P
         self.state = np.clip(self.ukf.x, self.limit[0], self.limit[1])
@@ -234,11 +246,14 @@ class PFbelief(object):
         self.obs_noise_func = obs_noise_func
         self.obs_check_func = obs_check_func
         self.sampling_period = sampling_period
+        if METADATA["observation_model"] == LEAKAGE_OBS:
+            self.leakage_model = GasLeakageModel()
 
     def reset(self, prior_dist):
         self.states = prior_dist.sample(self.n)
         # if self.collision_func(np.dot(self.weights, self.states)):
         #     self.states = [self.collision_deviation(p) for p in self.states]
+        # self.states = np.concatenate((np.clip(self.states[:,:2], self.limit[0][:2], self.limit[1][:2]),self.states[:,2:]),axis=1)
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.weights = np.array([1 / self.n] * self.n)
         self.state, self.cov = self.calculate_bs_moments()
@@ -248,6 +263,7 @@ class PFbelief(object):
         # self.states = np.array([np.matmul(self.transition_func.coefficient,state) for state in self.states])
         # if self.collision_func(np.dot(self.weights, self.states)):
         #     self.states = [self.collision_deviation(p) for p in self.states]
+        # self.states = np.concatenate((np.clip(self.states[:,:2], self.limit[0][:2], self.limit[1][:2]),self.states[:,2:]),axis=1)
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -265,13 +281,17 @@ class PFbelief(object):
         # un_normed_cond_ll_logprobs = batch_mvnorm_logpdf(np.array(observation),np.array(obs_means),np.array(obs_noise_covs))
         # un_normed_cond_ll_logprobs = batch_mvnorm_logpdf_multi_cov(np.array(observation), np.array(obs_means),
         #                                                            np.array(obs_noise_covs))
-        un_normed_cond_ll_logprobs = [
-            multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
-                                                                                      xy_base=agent_state[:2],
-                                                                                      theta_base=agent_state[2])),
-                                       self.obs_noise_func(observed))
-            for state_sample in
-            next_state_samples]
+        if METADATA["observation_model"] == GAUSSIAN_OBS:
+            un_normed_cond_ll_logprobs = [
+                multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
+                                                                                          xy_base=agent_state[:2],
+                                                                                          theta_base=agent_state[2])),
+                                           self.obs_noise_func(observation), allow_singular=True)
+                for state_sample in
+                next_state_samples]
+        else:
+            un_normed_cond_ll_logprobs = self.leakage_model.measurement_log_llhs(agent_state, next_state_samples,
+                                                                                 observation)
         log_weights_new = un_normed_cond_ll_logprobs + np.log(self.weights)
         log_weights_new = log_weights_new - np.max(log_weights_new)
         if np.sum(np.exp(log_weights_new)) != 0:
@@ -291,6 +311,7 @@ class PFbelief(object):
         self.states = next_state_samples
         # if self.collision_func(np.dot(weights_new, next_state_samples)):
         #     self.states = [self.collision_deviation(p) for p in next_state_samples]
+        # self.states = np.concatenate((np.clip(self.states[:,:2], self.limit[0][:2], self.limit[1][:2]),self.states[:,2:]),axis=1)
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -303,16 +324,19 @@ class PFbelief(object):
         return bs_resampled
 
     def calculate_bs_moments(self):
-        mean_val = np.dot(self.weights, self.states)
-        if len(mean_val) > 1:
-            mean_val = np.average(self.states, axis=0, weights=self.weights)
-            var_val = np.cov(self.states, rowvar=False, aweights=self.weights)
-
-            # deviation = np.array(self.states) - mean_val
-            # correlations = [np.outer(deviation[i], deviation[i]) for i in range(self.n)]
-            # var_val = np.sum([correlations[i] * self.weights[i] for i in range(self.n)], axis=0)
-        else:
-            var_val = np.dot(self.weights, (np.array(self.states) - mean_val) ** 2)
+        # mean_val = np.dot(self.weights, self.states)
+        state_dim = len(self.states[0])
+        gmm_approx = GMMDist(self.weights, self.states, [np.eye(state_dim) * 0.01 for _ in self.weights])
+        mean_val,var_val = gmm_approx.compute_mms()
+        # if len(mean_val) > 1:
+        #     mean_val = np.average(self.states, axis=0, weights=self.weights)
+        #     var_val = np.cov(self.states, rowvar=False, aweights=self.weights)
+        #
+        #     # deviation = np.array(self.states) - mean_val
+        #     # correlations = [np.outer(deviation[i], deviation[i]) for i in range(self.n)]
+        #     # var_val = np.sum([correlations[i] * self.weights[i] for i in range(self.n)], axis=0)
+        # else:
+        #     var_val = np.dot(self.weights, (np.array(self.states) - mean_val) ** 2)
         return mean_val, var_val
 
     def entropy(self):
@@ -378,3 +402,78 @@ class PFbelief(object):
             return del_vx, del_vy
         else:
             return 0., 0.
+
+
+class AuxiliaryPFbelief(PFbelief):
+    def __init__(self, dim, limit, transition_func, n, effective_n, dim_z=2,
+                 obs_noise_func=None, collision_func=None, obs_check_func=None, sampling_period=0.5):
+        super().__init__(dim, limit, transition_func, n, effective_n, dim_z,
+                         obs_noise_func, collision_func, obs_check_func, sampling_period)
+        self.last_states = None
+        self.last_weights = None
+
+    def predict(self):
+        self.last_states = np.array(self.states)
+        self.last_weights = np.array(self.weights)
+        self.states = self.transition_func.sample(self.states, self.n)
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
+        self.state, self.cov = self.calculate_bs_moments()
+
+    def reset(self, prior_dist):
+        self.states = prior_dist.sample(self.n)
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
+        self.weights = np.array([1 / self.n] * self.n)
+        self.last_states = np.array(self.states)
+        self.last_weights = np.array(self.weights)
+        self.state, self.cov = self.calculate_bs_moments()
+
+    def update(self, observation_info, agent_state):
+        observed = observation_info[0]
+        observation = observation_info[1]
+        last_state_samples_indices = np.random.choice(self.last_states.shape[0], size=self.n, replace=True,
+                                                      p=self.last_weights)
+        last_state_samples = self.last_states[last_state_samples_indices]
+        mus = self.transition_func.compute_marginal_mean(last_state_samples)
+        un_normed_cond_ll_logprobs = [
+            multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
+                                                                                      xy_base=agent_state[:2],
+                                                                                      theta_base=agent_state[2])),
+                                       self.obs_noise_func(observation), allow_singular=True)
+            for state_sample in
+            mus]
+        # log_weights_new = un_normed_cond_ll_logprobs + np.log(self.weights)
+        un_normed_cond_ll_logprobs = np.array(un_normed_cond_ll_logprobs) - np.max(un_normed_cond_ll_logprobs)
+        first_stage_weights = np.exp(un_normed_cond_ll_logprobs) / np.sum(np.exp(un_normed_cond_ll_logprobs))
+        preselected_samples_indices = np.random.choice(self.last_states.shape[0], size=self.n, replace=True,
+                                                       p=first_stage_weights)
+        preselected_samples = self.last_states[preselected_samples_indices]
+        next_state_samples = self.transition_func.sample(preselected_samples, self.n)
+        un_normed_cond_ll_logprobs_new = [
+            multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
+                                                                                      xy_base=agent_state[:2],
+                                                                                      theta_base=agent_state[2])),
+                                       self.obs_noise_func(observation), allow_singular=True)
+            for state_sample in
+            next_state_samples]
+        un_normed_cond_ll_logprobs_new = np.array(un_normed_cond_ll_logprobs_new) - np.max(
+            un_normed_cond_ll_logprobs_new)
+        log_weights_new = np.array(un_normed_cond_ll_logprobs_new) - np.array(un_normed_cond_ll_logprobs)
+        log_weights_new = log_weights_new - np.max(log_weights_new)
+        weights_new = np.exp(log_weights_new) / np.sum(np.exp(log_weights_new))
+
+        # sample_efficiency = 1 / np.sum(weights_new ** 2)
+        # if sample_efficiency < self.effective_n:
+        #     random_samples = np.random.choice(next_state_samples.shape[0], size=self.n, replace=True, p=weights_new)
+        #     next_state_samples = next_state_samples[random_samples]
+        #     weights_new = np.ones(self.n) * (1 / self.n)
+            # post_dist = GMMDist(weights_new, pred_state_marg.means, pred_state_marg.covs)
+            # sampled_data = post_dist.sample(N)
+
+        self.last_states = np.array(self.states)
+        self.last_weights = np.array(self.weights)
+        self.weights = weights_new
+        self.states = next_state_samples
+        # if self.collision_func(np.dot(weights_new, next_state_samples)):
+        #     self.states = [self.collision_deviation(p) for p in next_state_samples]
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
+        self.state, self.cov = self.calculate_bs_moments()
