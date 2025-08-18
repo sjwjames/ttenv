@@ -247,6 +247,28 @@ class TargetTrackingBase(gym.Env):
                                     path=target_path[i]) for i in range(self.num_targets)]
         self.targets = targets
 
+    def sample_observation(self, target_state, agent_state):
+        r, alpha = util.relative_distance_polar(target_state[:2],
+                                                xy_base=agent_state[:2],
+                                                theta_base=agent_state[2])
+        observed = (r <= self.sensor_r) \
+                   & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
+                   & (not (self.MAP.is_blocked(agent_state, target_state)))
+        z = None
+        if self.observation_model == GAUSSIAN_OBS:
+            if observed:
+                z = np.array([r, alpha])
+                z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
+        elif self.observation_model == LEAKAGE_OBS:
+            z = self.leakage_model.generate_sample(agent_state, target_state)
+            if z > 0.0:
+                observed = True
+            else:
+                observed = False
+        else:
+            raise Exception("Unsupported measurement model")
+        return observed, z
+
     def observation(self, target):
         r, alpha = util.relative_distance_polar(target.state[:2],
                                                 xy_base=self.agent.state[:2],

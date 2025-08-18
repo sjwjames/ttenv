@@ -1,5 +1,11 @@
 import os
+
+import numpy as np
 import torch
+from matplotlib import pyplot as plt
+from scipy.stats import multivariate_normal
+
+
 
 # ================================================================
 # Saving variables
@@ -143,3 +149,59 @@ class Uint8Processor(BatchProcessor):
             Processed data as normalized float32 tensor
         """
         return torch.tensor(data, device=self.device, dtype=torch.uint8).float() / 255.0
+
+
+def plot_gaussian_contours(gaussians, grid_size=200, contour_levels=5, colors=None, filled=False):
+    """
+    Plot contours for multiple 2D Gaussian distributions.
+
+    Parameters
+    ----------
+    gaussians : list of (mean, cov)
+        mean : np.ndarray of shape (2,)
+        cov : np.ndarray of shape (2, 2)
+    grid_size : int
+        Number of grid points per axis for PDF evaluation.
+    contour_levels : int
+        Number of contour levels to plot.
+    colors : list of str or None
+        Colors for each Gaussian. If None, defaults to matplotlib cycle.
+    filled : bool
+        If True, use filled contours with transparency; else line contours.
+    """
+    # Compute global bounds from means
+    gaussians_2d = [(mean[:2], cov[:2, :2]) for mean, cov in gaussians]
+
+    # Determine bounds
+    all_means = np.array([m for m, _ in gaussians_2d])
+    x_min, x_max = all_means[:, 0].min() - 3, all_means[:, 0].max() + 3
+    y_min, y_max = all_means[:, 1].min() - 3, all_means[:, 1].max() + 3
+
+    # Create grid
+    x = np.linspace(x_min, x_max, grid_size)
+    y = np.linspace(y_min, y_max, grid_size)
+    X, Y = np.meshgrid(x, y)
+    pos = np.dstack((X, Y))
+
+    # Colors
+    if colors is None:
+        colors = plt.cm.tab10.colors
+
+    plt.figure(figsize=(8, 6))
+    for i, (mean, cov) in enumerate(gaussians_2d):
+        rv = multivariate_normal(mean, cov)
+        Z = rv.pdf(pos)
+        color = colors[i % len(colors)]
+        if filled:
+            plt.contourf(X, Y, Z, levels=contour_levels, alpha=0.5, colors=[color])
+        else:
+            plt.contour(X, Y, Z, levels=contour_levels, colors=[color])
+        plt.scatter(*mean, color=color, marker='x', s=100, label=f"Mean {mean}")
+
+    plt.xlabel('Dimension 0')
+    plt.ylabel('Dimension 1')
+    plt.legend()
+    plt.title('First Two Dimensions of Gaussians')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()

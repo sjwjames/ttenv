@@ -99,7 +99,7 @@ class UKFbelief(object):
     """
 
     def __init__(self, dim, limit, dim_z=2, fx=None, W=None, obs_noise_func=None,
-                 collision_func=None, sampling_period=0.5, kappa=1, hx=None,measurement_model=GAUSSIAN_OBS):
+                 collision_func=None, sampling_period=0.5, kappa=1, hx=None, measurement_model=GAUSSIAN_OBS):
         """
         dim : dimension of state
             ***Assuming dim==3: (x,y,theta), dim==4: (x,y,xdot,ydot), dim==5: (x,y,theta,v,w)
@@ -185,12 +185,12 @@ class UKFbelief(object):
             return r_z
 
         sigmas = JulierSigmaPoints(n=dim, kappa=kappa)
-        if measurement_model==GAUSSIAN_OBS:
+        if measurement_model == GAUSSIAN_OBS:
             self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
                                              hx=hx, points=sigmas, x_mean_fn=x_mean_fn_,
                                              z_mean_fn=z_mean_fn_, residual_x=residual_x_,
                                              residual_z=residual_z_)
-        elif measurement_model==LEAKAGE_OBS:
+        elif measurement_model == LEAKAGE_OBS:
             self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
                                              hx=hx, points=sigmas)
 
@@ -267,6 +267,42 @@ class PFbelief(object):
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
+    def generate_predictive_samples(self):
+        states = self.transition_func.sample(self.states, self.n)
+        states = np.clip(states, self.limit[0], self.limit[1])
+        return states
+
+    def sample_next_belief(self, observation_info, next_state_samples, agent_state):
+        observed = observation_info[0]
+        if not observed:
+            return self.weights, next_state_samples
+        observation = observation_info[1]
+        if METADATA["observation_model"] == GAUSSIAN_OBS:
+            un_normed_cond_ll_logprobs = [
+                multivariate_normal.logpdf(observation, list(util.relative_distance_polar(state_sample[:2],
+                                                                                          xy_base=agent_state[:2],
+                                                                                          theta_base=agent_state[2])),
+                                           self.obs_noise_func(observation), allow_singular=True)
+                for state_sample in
+                next_state_samples]
+        else:
+            un_normed_cond_ll_logprobs = self.leakage_model.measurement_log_llhs(agent_state, next_state_samples,
+                                                                                 observation)
+        log_weights_new = un_normed_cond_ll_logprobs + np.log(self.weights)
+        log_weights_new = log_weights_new - np.max(log_weights_new)
+        if np.sum(np.exp(log_weights_new)) != 0:
+            weights_new = np.exp(log_weights_new) / np.sum(np.exp(log_weights_new))
+        else:
+            weights_new = self.weights
+
+        sample_efficiency = 1 / np.sum(weights_new ** 2)
+        if sample_efficiency < self.effective_n:
+            random_samples = np.random.choice(next_state_samples.shape[0], size=self.n, replace=True, p=weights_new)
+            next_state_samples = next_state_samples[random_samples]
+            weights_new = np.ones(self.n) * (1 / self.n)
+        next_state_samples = np.clip(next_state_samples, self.limit[0], self.limit[1])
+        return weights_new, next_state_samples
+
     def update(self, observation_info, agent_state):
         observed = observation_info[0]
         observation = observation_info[1]
@@ -323,11 +359,15 @@ class PFbelief(object):
             bs_resampled = np.random.choice(self.states, self.n, replace=True, p=self.weights)
         return bs_resampled
 
+    @staticmethod
+    def calculate_bs_moments_static(weights, states):
+        GMMDist(weights, states)
+
     def calculate_bs_moments(self):
         # mean_val = np.dot(self.weights, self.states)
         state_dim = len(self.states[0])
         gmm_approx = GMMDist(self.weights, self.states, [np.eye(state_dim) * 0.01 for _ in self.weights])
-        mean_val,var_val = gmm_approx.compute_mms()
+        mean_val, var_val = gmm_approx.compute_mms()
         # if len(mean_val) > 1:
         #     mean_val = np.average(self.states, axis=0, weights=self.weights)
         #     var_val = np.cov(self.states, rowvar=False, aweights=self.weights)
@@ -338,6 +378,13 @@ class PFbelief(object):
         # else:
         #     var_val = np.dot(self.weights, (np.array(self.states) - mean_val) ** 2)
         return mean_val, var_val
+
+    # @staticmethod
+    # def entropy_static(states, weights):
+    #     state_dim = len(states[0])
+    #     gmm_approx = GMMDist(weights, states, [np.eye(state_dim) * 0.01 for _ in weights])
+    #     ent = gmm_approx.sg_entropy_ub()
+    #     return ent
 
     def entropy(self):
         state_dim = len(self.states[0])
@@ -466,8 +513,8 @@ class AuxiliaryPFbelief(PFbelief):
         #     random_samples = np.random.choice(next_state_samples.shape[0], size=self.n, replace=True, p=weights_new)
         #     next_state_samples = next_state_samples[random_samples]
         #     weights_new = np.ones(self.n) * (1 / self.n)
-            # post_dist = GMMDist(weights_new, pred_state_marg.means, pred_state_marg.covs)
-            # sampled_data = post_dist.sample(N)
+        # post_dist = GMMDist(weights_new, pred_state_marg.means, pred_state_marg.covs)
+        # sampled_data = post_dist.sample(N)
 
         self.last_states = np.array(self.states)
         self.last_weights = np.array(self.weights)

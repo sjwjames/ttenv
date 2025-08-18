@@ -713,14 +713,17 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
             #     self.belief_targets[i].state[2:],
             #     self.agent.state[:2], self.agent.state[2],
             #     action_vw[0], action_vw[1])
-            particle_list += [[x] + list(util.relative_distance_polar(y[:2],
-                                                                      xy_base=self.agent.state[:2],
-                                                                      theta_base=self.agent.state[2])) + list(
-                util.relative_velocity_polar(
-                    y[:2],
-                    y[2:],
-                    self.agent.state[:2], self.agent.state[2],
-                    action_vw[0], action_vw[1])) for x, y in
+            # particle_list += [[x] + list(util.relative_distance_polar(y[:2],
+            #                                                           xy_base=self.agent.state[:2],
+            #                                                           theta_base=self.agent.state[2])) + list(
+            #     util.relative_velocity_polar(
+            #         y[:2],
+            #         y[2:],
+            #         self.agent.state[:2], self.agent.state[2],
+            #         action_vw[0], action_vw[1])) for x, y in
+            #                   zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
+
+            particle_list += [np.concatenate(([x],y),axis=0) for x, y in
                               zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
 
             #
@@ -872,18 +875,24 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
             r_detcov_std = - np.std(np.log(detcov))
             return reward, False, r_detcov_mean, r_detcov_std
         else:
-            c_penalty = 1.0
+            # c_penalty = 1.0
+            # mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
+            # detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
+            # r_detcov_mean = - np.mean(np.log(detcov))
+            # r_detcov_std = - np.std(np.log(detcov))
+            # normed_ent_reward = np.mean(mis) / self.max_ent
+            # ob_reward = np.sum([float(ob) for ob in kwargs["observed"]])
+            # reward = normed_ent_reward + ob_reward
+            # # reward = np.sum([float(ob) for ob in kwargs["observed"]])
+            # if "is_col" in kwargs.keys() and kwargs["is_col"]:
+            #     reward = reward - 1.0 * c_penalty
+            # return reward, False, r_detcov_mean,r_detcov_std
             mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
             detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
             r_detcov_mean = - np.mean(np.log(detcov))
             r_detcov_std = - np.std(np.log(detcov))
-            normed_ent_reward = np.mean(mis) / self.max_ent
-            ob_reward = np.sum([float(ob) for ob in kwargs["observed"]])
-            reward = normed_ent_reward + ob_reward
-            # reward = np.sum([float(ob) for ob in kwargs["observed"]])
-            if "is_col" in kwargs.keys() and kwargs["is_col"]:
-                reward = reward - 1.0 * c_penalty
-            return reward, False, r_detcov_mean,r_detcov_std
+            reward = np.sum(mis)
+            return reward, False, r_detcov_mean, r_detcov_std
 
 
         # xy_target_base = [util.transform_2d(bs.state[:2], self.agent.state[2], self.agent.state[:2]) for bs in

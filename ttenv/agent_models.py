@@ -89,6 +89,34 @@ class AgentDoubleInt2D_Nonlinear(AgentDoubleInt2D):
         self.range_check()
         return is_col
 
+    def sample_next(self):
+        new_state = np.matmul(self.A, self.state[:self.dim])
+        if self.W is not None:
+            noise_sample = np.random.multivariate_normal(np.zeros(self.dim, ), self.W)
+            new_state += noise_sample
+
+        is_col = 0
+        if self.collision_check(new_state[:2]):
+            new_state = self.collision_control()
+            is_col = 1
+
+        if self.obs_check_func is not None:
+            del_vx, del_vy = self.obstacle_detour_maneuver(
+                r_margin=METADATA['target_speed_limit'] * self.sampling_period * 2)
+            new_state[2] += del_vx
+            new_state[3] += del_vy
+        new_state[:2] = np.clip(new_state[:2], self.limit[0][:2], self.limit[1][:2])
+        v_square = new_state[2:] ** 2
+        del_v = np.sum(v_square) - self.limit[1][2] ** 2
+        if del_v > 0.0:
+            new_state[2] = np.sign(new_state[2]) * np.sqrt(max(0.0,
+                                                               v_square[0] - del_v * v_square[0] / (
+                                                                       v_square[0] + v_square[1])))
+            new_state[3] = np.sign(new_state[3]) * np.sqrt(max(0.0,
+                                                               v_square[1] - del_v * v_square[1] / (
+                                                                       v_square[0] + v_square[1])))
+        return new_state
+
     # function for the ukf calculation
     def fx(self, x, dt):
         new_state = np.matmul(self.A, x[:self.dim])
@@ -241,6 +269,37 @@ class AgentSE2(Agent):
 
         return is_col
 
+    def sample_next(self, control_input=None, margin_pos=None, col=False):
+        """
+        Parameters:
+        ----------
+        control_input : list. [linear_velocity, angular_velocity]
+        margin_pos : a minimum distance to a target
+        """
+        if control_input is None:
+            control_input = self.policy.get_control(self.state)
+        if self.dim == 3:
+            new_state = SE2Dynamics(self.state, self.sampling_period, control_input)
+        elif self.dim == 5:
+            new_state = SE2DynamicsVel(self.state, self.sampling_period, control_input)
+        is_col = 0
+        if self.collision_check(new_state[:2]):
+            is_col = 1
+            new_state[:2] = self.state[:2]
+            control_input = self.vw
+            if self.policy is not None:
+                corrected_policy = self.policy.collision(new_state)
+                if corrected_policy is not None:
+                    new_state = SE2DynamicsVel(self.state,
+                                               self.sampling_period, corrected_policy)
+        elif margin_pos is not None:
+            if self.margin_check(new_state[:2], margin_pos):
+                new_state[:2] = self.state[:2]
+                control_input = self.vw
+
+        new_state = np.clip(new_state, self.limit[0], self.limit[1])
+
+        return new_state
 
 class Agent2DFixedPath(Agent):
     """
