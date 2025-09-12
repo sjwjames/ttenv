@@ -91,8 +91,6 @@ class Logger():
         return len(self.ep_history['ep_rewards'])
 
     def finish(self, nb_train_steps, nb_epoch_steps, nb_warmup_steps=0):
-        import matplotlib
-        matplotlib.use('Agg')
         from matplotlib import pyplot as plt
         from util import mstd
 
@@ -251,8 +249,7 @@ def evaluation_ttenv(act, env_id,num_targets, eval_type='random', nb_itrs=5, ren
     return np.array(total_rewards, dtype=np.float32), np.array(total_nlogdetcov, dtype=np.float32)
 
 def batch_plot(list_records, save_dir, nb_train_steps, nb_epoch_steps, is_target_tracking=False):
-    import matplotlib
-    matplotlib.use('Agg')
+
     from matplotlib import pyplot as plt
     from util import mstd
 

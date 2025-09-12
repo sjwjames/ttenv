@@ -284,7 +284,6 @@ class TargetTrackingEnv0_1(TargetTrackingBase):
 
         return observed, z
 
-
     def observe_and_update_belief(self):
         observed = []
         for i in range(self.num_targets):
@@ -713,18 +712,18 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
             #     self.belief_targets[i].state[2:],
             #     self.agent.state[:2], self.agent.state[2],
             #     action_vw[0], action_vw[1])
-            # particle_list += [[x] + list(util.relative_distance_polar(y[:2],
-            #                                                           xy_base=self.agent.state[:2],
-            #                                                           theta_base=self.agent.state[2])) + list(
-            #     util.relative_velocity_polar(
-            #         y[:2],
-            #         y[2:],
-            #         self.agent.state[:2], self.agent.state[2],
-            #         action_vw[0], action_vw[1])) for x, y in
-            #                   zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
-
-            particle_list += [np.concatenate(([x],y),axis=0) for x, y in
+            particle_list += [[x] + list(util.relative_distance_polar(y[:2],
+                                                                      xy_base=self.agent.state[:2],
+                                                                      theta_base=self.agent.state[2])) + list(
+                util.relative_velocity_polar(
+                    y[:2],
+                    y[2:],
+                    self.agent.state[:2], self.agent.state[2],
+                    action_vw[0], action_vw[1])) for x, y in
                               zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
+
+            # particle_list += [np.concatenate(([x],y),axis=0) for x, y in
+            #                   zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
 
             #
             # observed_list = np.concatenate((observed_list, [LA.det(self.belief_targets[i].cov)]))
@@ -796,8 +795,9 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         #     dists.append(prior_gmm)
         # self.prior_dists = dists
         # return dists
-        dists = [GaussianDistribution(np.concatenate((init_pose['belief_targets'][i][:2], np.zeros(2))),
-                                      np.eye(self.target_dim) * self.target_init_cov) for i in range(self.num_targets)]
+        dists = [GaussianDistribution(
+            np.concatenate((init_pose['belief_targets'][i][:2], np.ones(2) * (METADATA['target_speed_limit'] / 2))),
+            np.eye(self.target_dim) * self.target_init_cov) for i in range(self.num_targets)]
         return dists
 
     def build_models(self, const_q=None, known_noise=True, **kwargs):
@@ -865,7 +865,7 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         # reward = np.sum([self.last_ents[i] - bf.entropy() for i, bf in
         #                  enumerate(self.belief_targets)])
         # return reward, False, 0, 0
-        if self.observation_model==LEAKAGE_OBS:
+        if self.observation_model == LEAKAGE_OBS:
             reward = np.sum([self.last_ents[i] - bf.entropy() for i, bf in
                              enumerate(self.belief_targets)])
             # ob_reward = np.sum([self.observation(target)[1] for target in self.targets])
@@ -888,12 +888,12 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
             #     reward = reward - 1.0 * c_penalty
             # return reward, False, r_detcov_mean,r_detcov_std
             mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
+            # mis = [ - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
             detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
             r_detcov_mean = - np.mean(np.log(detcov))
             r_detcov_std = - np.std(np.log(detcov))
             reward = np.sum(mis)
             return reward, False, r_detcov_mean, r_detcov_std
-
 
         # xy_target_base = [util.transform_2d(bs.state[:2], self.agent.state[2], self.agent.state[:2]) for bs in
         #                   self.belief_targets]

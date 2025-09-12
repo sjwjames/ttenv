@@ -32,8 +32,8 @@ METADATA_v1={
         'sensor_b_sd': 0.01, # sensor bearing noise.
         'target_init_cov': 30.0, # initial target diagonal Covariance.
         'target_init_vel': [0.0, 0.0], # target's initial velocity.
-        'target_speed_limit': 0.1, # velocity limit of targets.
-        'lin_dist_range_a2b':(10.0, 11.0),
+        'target_speed_limit': .1, # velocity limit of targets.
+        'lin_dist_range_a2b':(40.0, 41.0),
         'ang_dist_range_a2b':(-np.pi, np.pi),
         'lin_dist_range_b2t':(0.0, 1.0),
         'ang_dist_range_b2t':(-np.pi/2, np.pi/2),
@@ -49,7 +49,7 @@ METADATA_v1={
         'const_q': 0.5, # target noise constant in beliefs.
         'const_q_true': 0.01, # target noise constant of actual targets.
         'observation_model': GAUSSIAN_OBS,
-        'varying_ob_noise':False
+        'varying_ob_noise':True
     }
 
 METADATA_multi_v1={

@@ -3,11 +3,9 @@ import numpy as np
 from numpy import linalg as LA
 import os
 
-import matplotlib
 
 from ttenv.belief_tracker import PFbelief
 
-matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import animation
@@ -105,7 +103,7 @@ class Display2D(Wrapper):
                     (target_b_state[i][0], target_b_state[i][1]),
                     2 * np.sqrt(eig_val[0]) * self.c_cf,
                     2 * np.sqrt(eig_val[1]) * self.c_cf,
-                    angle=180 / np.pi * np.arctan2(np.real(eig_vec[0][1]),
+                    angle=-180 / np.pi * np.arctan2(np.real(eig_vec[0][1]),
                                                    np.real(eig_vec[0][0])), fill=True, zorder=2,
                     facecolor='g', alpha=0.5)
                 if isinstance(self.env_core.belief_targets[i], PFbelief):

@@ -66,6 +66,7 @@ parser.add_argument('--noise', type=float, default=1.0)
 parser.add_argument('--blocked', type=int, default=0)
 parser.add_argument('--n_neighbours', type=int, default=5)
 parser.add_argument('--n_beliefs', type=int, default=10)
+parser.add_argument('--mc_reward_mode', choices=['total', 'time'], default='time')
 
 args = parser.parse_args()
 
@@ -234,7 +235,9 @@ def train(seed, save_dir):
                           reuse_last_init=args.reuse_last_init,
                           blocked=args.blocked,
                           n_neighbours=args.n_neighbours,
-                          n_beliefs=args.n_beliefs)
+                          n_beliefs=args.n_beliefs,
+                          qval_calculation=args.qval_calculation,
+                          reward_mode=args.mc_reward_mode)
 
     print("Saving model to model.pkl")
     act.save(os.path.join(save_dir_0, "model.pkl"))
@@ -275,7 +278,7 @@ def test():
     for _ in range(args.repeat):
         np.random.seed(seed)
         torch.manual_seed(seed)
-        test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/"
+        test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/" + str(METADATA["target_speed_limit"]) + "/"
         if not args.reuse_last_init:
             test_directory_path += "random_init/"
         os.makedirs(test_directory_path, exist_ok=True)
@@ -312,28 +315,30 @@ def test():
                                    'belief_targets': [env.belief_targets[i].state for i in
                                                       range(args.nb_targets)]})
             s_time = time.time()
-
+            episode_step = 0
             while not terminated and not truncated:
-                env_info = {"action_map": env.action_map, "observation_func": env.sample_observation,
-                            "agent_model": env.agent,
-                            "target_belief": env.belief_targets}
-                knn_state = mcknn.project_belief(obs["agent"].cpu().numpy().squeeze(), obs["target"].cpu().numpy())
-                obs["env_info"] = env_info
-                obs["knn_state"] = knn_state
+
                 if seed == args.seed:
                     if args.render:
                         env.render(log_dir=test_directory_path)
                 # if args.ros_log:
                 #     ros_log.log(env)
                 if args.qval_calculation == "mc" or args.qval_calculation == "mc-greedy":
+                    env_info = {"action_map": env.action_map, "observation_func": env.sample_observation,
+                                "agent_model": env.agent,
+                                "target_belief": env.belief_targets}
+                    knn_state = mcknn.project_belief(obs["agent"].cpu().numpy().squeeze(), obs["target"].cpu().numpy())
+                    obs["env_info"] = env_info
+                    obs["knn_state"] = knn_state
                     greedy_flag = False
                     if args.qval_calculation == "mc-greedy":
                         greedy_flag = True
-                    q_vals = act(obs, stochastic=False, greedy_flag=greedy_flag)
-                    action = np.argmax(q_vals)
+                    action, q_vals = act(obs, stochastic=False, update_eps=0.0, greedy_flag=greedy_flag,
+                                         episode_step=episode_step)
                 else:
                     action = act(obs, stochastic=False)
                 next_obs, rew, terminated, truncated, info = env.step(action)
+                episode_step += 1
                 obs = next_obs
                 episode_rew += rew
                 nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0

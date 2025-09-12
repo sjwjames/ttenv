@@ -362,8 +362,6 @@ def cell_to_se2_batch(cell_idx, mapmin, mapres):
     return (cell_idx[:,0] + 0.5) * mapres[0] + mapmin[0], (cell_idx[:,1] + 0.5) * mapres[1] + mapmin[1]
 
 def generate_trajectory(map_obj):
-    import matplotlib
-    matplotlib.use('TkAgg')
     from matplotlib import pyplot as plt
     from scipy.interpolate import interp1d
 
