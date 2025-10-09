@@ -1,0 +1,25 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="run_tracking_train" type="PythonConfigurationType" factoryName="Python">
+    <module name="ttenv" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="Python 3.9" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/ttenv/dqn" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/ttenv/dqn/run_tracking.py" />
+    <option name="PARAMETERS" value="--device &quot;cpu&quot; --mode &quot;train&quot; --env &quot;TargetTracking-v1&quot; --map empty --particle_belief 0 --num_particles 100 --nb_train_steps 20000 --reuse_last_init 1 --nb_epoch_steps 100 --target_update_freq 100 --checkpoint_freq 1000 --nb_warmup_steps 2000 --act_policy bayesian --qval_calculation q-network --blocked 1 --n_neighbours 10 --n_beliefs 10 --mc_reward_mode total" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="false" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>

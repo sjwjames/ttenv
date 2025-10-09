@@ -266,10 +266,7 @@ class TargetTrackingBase(gym.Env):
                     z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
         elif self.observation_model == LEAKAGE_OBS:
             z = self.leakage_model.generate_sample(agent_state, target_state)
-            if z > 0.0:
-                observed = True
-            else:
-                observed = False
+            observed = True
         else:
             raise Exception("Unsupported measurement model")
         return observed, z
@@ -293,10 +290,7 @@ class TargetTrackingBase(gym.Env):
                     z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
         elif self.observation_model == LEAKAGE_OBS:
             z = self.leakage_model.generate_sample(self.agent.state, target.state)
-            if z > 0.0:
-                observed = True
-            else:
-                observed = False
+            observed = True
         else:
             raise Exception("Unsupported measurement model")
         return observed, z

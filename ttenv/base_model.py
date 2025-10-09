@@ -607,7 +607,7 @@ class GasLeakageModel:
         xx, yy = np.meshgrid(x, y)
         positions = np.vstack([xx.ravel(), yy.ravel()]).T
         mus = [self.get_mu(a, target_pos) for a in positions]
-        plt.contour(xx, yy, np.reshape(mus, [n, n]), levels=20, cmap='inferno')
+        plt.contourf(xx, yy, np.reshape(mus, [n, n]), levels=20, cmap='coolwarm')
         plt.colorbar()
         plt.title('Gas Leakage Mean Concentration')
         plt.xlabel('X')

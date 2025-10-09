@@ -67,6 +67,7 @@ parser.add_argument('--blocked', type=int, default=0)
 parser.add_argument('--n_neighbours', type=int, default=5)
 parser.add_argument('--n_beliefs', type=int, default=10)
 parser.add_argument('--mc_reward_mode', choices=['total', 'time'], default='time')
+parser.add_argument('--post_training', type=int, default=0)
 
 args = parser.parse_args()
 
@@ -244,7 +245,8 @@ def train(seed, save_dir):
 
     if args.record == 1:
         env.moviewriter.finish()
-
+    if args.post_training:
+        pass
 
 def test():
     # learning_prop = json.load(open(os.path.join(args.log_dir, 'learning_prop.json'), 'r'))
@@ -278,9 +280,10 @@ def test():
     for _ in range(args.repeat):
         np.random.seed(seed)
         torch.manual_seed(seed)
-        test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/" + str(METADATA["target_speed_limit"]) + "/"
+        test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/"
         if not args.reuse_last_init:
             test_directory_path += "random_init/"
+        test_directory_path += str(METADATA["target_speed_limit"]) + "/"+ str(METADATA["lin_dist_range_a2b"][0]) + "/"
         os.makedirs(test_directory_path, exist_ok=True)
         ep = 0
         init_pos = []

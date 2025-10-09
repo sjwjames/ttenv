@@ -28,4 +28,4 @@ if __name__ == "__main__":
     print("TEST ENV_UTIL.PY...")
     # test_env_util()
     leakage_model = GasLeakageModel()
-    leakage_model.plot_mu([10,10],[0,50],[0,50],1000)
+    leakage_model.plot_mu([10,10],[0,100],[0,100],1000)

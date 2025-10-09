@@ -144,7 +144,7 @@ class Display2D(Wrapper):
                         fill=False, edgecolor='b')
                     ax.add_patch(local_rect)
 
-            if self.env_core.observation_model != LEAKAGE_OBS:
+            if self.env_core.observation_model != LEAKAGE_OBS and not METADATA["varying_ob_noise"]:
                 sensor_arc = patches.Arc((state[0], state[1]), METADATA['sensor_r'] * 2, METADATA['sensor_r'] * 2,
                                          angle=state[2] / np.pi * 180, theta1=-METADATA['fov'] / 2,
                                          theta2=METADATA['fov'] / 2, facecolor='gray')

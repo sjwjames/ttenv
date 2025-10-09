@@ -275,7 +275,6 @@ class PFbelief(object):
     def sample_next_belief(self, observation_info, next_state_samples, agent_state):
         observed = observation_info[0]
         if not observed:
-            print("not observed")
             return self.weights, next_state_samples
         observation = observation_info[1]
         if METADATA["observation_model"] == GAUSSIAN_OBS:

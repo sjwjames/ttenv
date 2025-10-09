@@ -56,7 +56,7 @@ def hellinger_distance(m1, v1, m2, v2):
 
 class MCKNNModel:
     def __init__(self, target_dim, agent_dim, T, gamma=0.9, target_type="particle", reward_mode="total", n_neighbors=5,
-                 n_beliefs=10):
+                 n_beliefs=10, post_training=False):
         self.target_dim = target_dim
         self.agent_dim = agent_dim
         # self.gamma = gamma
@@ -64,6 +64,7 @@ class MCKNNModel:
         self.n_beliefs = n_beliefs
         self.T = T
         self.reward_mode = reward_mode
+        self.post_training = post_training
 
         def distance_metric(data1, data2):
             if target_type == "particle":
@@ -88,7 +89,7 @@ class MCKNNModel:
 
     def __call__(self, belief_states, agent_info, env_info, knn_state, greedy_flag=False, episode_step=None,
                  save_dir=None, **kwargs):
-        print("===== t = "+str(episode_step)+" =====")
+        print("===== t = " + str(episode_step) + " =====")
         target_beliefs = env_info["target_belief"]
         agent_model = env_info["agent_model"]
         observation_func = env_info["observation_func"]
@@ -107,7 +108,7 @@ class MCKNNModel:
         selected_neighbor_e = {}
         future_vs = []
         for i, action in enumerate(action_map.values()):
-            next_agent_state = agent_model.sample_next(action)
+            next_agent_state,is_col = agent_model.sample_next(action)
             sampled_belief_measurements = [[] for _ in range(self.n_beliefs)]
             for j, target_belief in enumerate(target_beliefs):
                 predictive_zs = target_belief.generate_predictive_samples()
@@ -129,10 +130,15 @@ class MCKNNModel:
                 gmm_next_beliefs = [GMMDist(next_b[0], next_b[1], gmm_cov) for next_b
                                     in
                                     sample_next_beliefs]
+                # r_mean = np.mean(
+                #     [predictive_gmm.sg_entropy_ub() - next_b.sg_entropy_ub() for next_b
+                #      in
+                #      gmm_next_beliefs])
+
                 r_mean = np.mean(
                     [predictive_gmm.sg_entropy_ub() - next_b.sg_entropy_ub() for next_b
                      in
-                     gmm_next_beliefs])
+                     gmm_next_beliefs]) - is_col
                 # r_mean = np.mean(
                 #     [-next_b.sg_entropy_ub() for next_b in gmm_next_beliefs])
                 # print(r_mean)
@@ -185,8 +191,10 @@ class MCKNNModel:
                         #                             weights=normalized_distances))
 
                         # information rate
-                        v_futures.append(np.average(self.values_total[idx_item,0]/(self.T-self.values_total[idx_item,1]), axis=0,
-                                                    weights=normalized_distances))
+                        v_futures.append(
+                            np.average(self.values_total[idx_item, 0] / (self.T - self.values_total[idx_item, 1]),
+                                       axis=0,
+                                       weights=normalized_distances))
                         if action not in selected_neighbor_t.keys():
                             selected_neighbor_t[action] = [self.values_total[idx_item, 1]]
                         else:
@@ -377,6 +385,9 @@ class ActWrapper:
         with open(path, "wb") as f:
             cloudpickle.dump((self._agent, self._act_params), f)
 
+    def post_training(self):
+        pass
+
 
 def load(path, act_params=None):
     """Load agent from file.
@@ -521,10 +532,10 @@ def learn(env,
                 step_qvals.append(q_vals)
             # Execute action and observe next state
             next_obs, reward, terminated, truncated, info = env.step(action)
-            training_dir = os.path.join(save_dir, str(num_episodes) + "_training/")
-            if not os.path.exists(training_dir):
-                os.makedirs(training_dir)
-            env.render(log_dir=training_dir)
+            # training_dir = os.path.join(save_dir, str(num_episodes) + "_training/")
+            # if not os.path.exists(training_dir):
+            #     os.makedirs(training_dir)
+            # env.render(log_dir=training_dir)
             done = terminated or truncated
 
             # if t >= learning_starts:
@@ -634,10 +645,10 @@ def learn(env,
                         current_val -= step_vals[i]
                     if t >= learning_starts - 1:
                         model.fit(belief_states, state_values)
-                if len(step_qvals) > 0:
-                    plot_q_values_heatmap(step_qvals, training_dir + "q values.pdf",
-                                          action_labels=np.round(list(env.action_map.values()), 2))
-                    np.savetxt(training_dir + "q_vals.csv", np.array(step_qvals), delimiter=',')
+                # if len(step_qvals) > 0:
+                #     plot_q_values_heatmap(step_qvals, training_dir + "q values.pdf",
+                #                           action_labels=np.round(list(env.action_map.values()), 2))
+                #     np.savetxt(training_dir + "q_vals.csv", np.array(step_qvals), delimiter=',')
                 # Reset environment
                 obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,
                                 lin_dist_range_b2t=lin_dist_range_b2t, ang_dist_range_a2b=ang_dist_range_a2b,
@@ -678,4 +689,5 @@ def learn(env,
         ax.set_ylabel("Return")
         plt.savefig(os.path.join(save_dir, "eval_returns.png"))
         plt.close(fig)
+
     return act

@@ -299,7 +299,7 @@ class AgentSE2(Agent):
 
         new_state = np.clip(new_state, self.limit[0], self.limit[1])
 
-        return new_state
+        return new_state,is_col
 
 class Agent2DFixedPath(Agent):
     """
