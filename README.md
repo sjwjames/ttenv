@@ -1,3 +1,4 @@
+# We build this repo based on https://github.com/coco66/ttenv, and appreicate the author open-sourced their code.
 # Target Tracking Environment for Reinforcement Learning (OpenAI gym framework)
 This repository contains target tracking environments for reinforcement learning (RL) presented in the following papers which applies RL to active target tracking problems.
 * Learning to Track Dynamic Targets with Partially Known Environments (https://arxiv.org/abs/2006.10190) : H. Jeong, H. Hassani, M. Morari, D. D. Lee, and G. J. Pappas, “Learning to Track Dynamic Targets with Partially Known Environments,”
@@ -14,7 +15,7 @@ pip install gym
 ```
 Clone the repository
 ```
-git clone https://github.com/coco66/ttenv.git
+git clone https://github.com/sjwjames/ttenv.git
 ```
 ```
 cd ttenv && source setup
@@ -31,6 +32,9 @@ Targets only move with a small noise in the x and y-axis and Kalman Filter is us
 
 * TargetTracking-v1 : A double integrator target model with Kalman Filter belief tracker.
 A dynamic model of each target follows a double integrator and Kalman Filter is used for the belief estimate. A target state of each target consists of its x,y position and xdot, ydot.
+
+* TargetTracking-v1_1 : A double integrator target model with Particle Filter belief tracker.
+A dynamic model of each target follows a double integrator and Particle Filter is used for the belief estimate. A target state of each target consists of its x,y position and xdot, ydot.
 
 * TargetTracking-v2 : SE2 Target model with UKF belief tracker
 A dynamic model of each target follows the SE2 dynamics with a certain control policy for linear and angular velocities. The target state consists of x, y, and yaw.
@@ -56,22 +60,32 @@ Currently, you can randomly initialize them within a certain conditions or provi
 
 ## Metadata
 Some metadata examples for the environment setup are presented in ttenv/ttenv/metatdata.py.
-METADATA_v0 was used for the experiments presented in “Learning Q-network for Active Information Acquisition”. It is slightly different due to the update on the base structure of the repository. METADATA_v1 and METADATA_multi_v1 were used for the experiments presented in “Learning to Track Dynamic Targets with Partially Known Environments”.
+METADATA_v1 was used for the experiments presented. To note, some variables need to be changed for different experiments,
+* Normal active target tracking: "varying_ob_noise":False, "observation_model":GAUSSIAN_OBS
+* Heteroscadastic variance active target tracking: "varying_ob_noise":True, "observation_model":GAUSSIAN_OBS
+* Leakage simulation: "varying_ob_noise":False, "observation_model":LEAKAGE_OBS
 
-## Running with RL
-Examples of learning a deep reinforcement learning policy can be found in the ADFQ repository (https://github.com/coco66/ADFQ).
-* DQN : ADFQ/deep_adfq/baselines0/deepq/run_tracking.py
-* Double DQN : ADFQ/deep_adfq/baselines0/deepq/run_tracking.py --double_q=1
-* Deep ADFQ : ADFQ/deep_adfq/run_tracking.py
+## Training
+* ADFQ: --device "mps" --mode "train" --env "TargetTracking-v1" --map obstacles --particle_belief 0 --num_particles 100 --nb_train_steps 50000 --reuse_last_init 1 --nb_epoch_steps 100 --target_update_freq 50 --checkpoint_freq 1000 --nb_warmup_steps 5000 --act_policy bayesian --blocked 1
+* DQN: --device "mps" --mode "train" --env "TargetTracking-v1" --map obstacles --particle_belief 0 --num_particles 100 --nb_train_steps 50000 --reuse_last_init 1 --nb_epoch_steps 100 --target_update_freq 50 --checkpoint_freq 1000 --nb_warmup_steps 5000 --act_policy egreedy --blocked 1
+* DPBQN: --device "mps" --mode "train" --env "TargetTracking-v1_1" --map obstacles --particle_belief 1 --num_particles 100 --nb_train_steps 50000 --reuse_last_init 1 --nb_epoch_steps 100 --target_update_freq 50 --checkpoint_freq 1000 --nb_warmup_steps 5000 --act_policy egreedy --blocked 1
 
+## Testing
+* ADFQ: --device "mps" --mode "test" --log_fname model.pkl --map obstacles --repeat 5 --env "TargetTracking-v1" --particle_belief 0 --reuse_last_init 1 --log_dir ./experiments/final_results/non-markovian/TargetTracking-v1_07152337/seed_0/ --init_file_path ./experiments/final_results/non-markovian/TargetTracking-v1_07152337/seed_0/init_pose.pkl --act_policy bayesian --blocked 1
+* DQN: --device "mps" --mode "test" --log_fname model.pkl --map obstacles --repeat 5 --env "TargetTracking-v1" --particle_belief 0 --reuse_last_init 1 --log_dir ./experiments/final_results/non-markovian/TargetTracking-v1_07152337/seed_0/ --init_file_path ./experiments/final_results/non-markovian/TargetTracking-v1_07152337/seed_0/init_pose.pkl --act_policy egreedy --blocked 1
+* DPBQN: --device "mps" --mode "test" --log_fname model.pkl --map obstacles --repeat 5 --env "TargetTracking-v1_1" --particle_belief 1 --reuse_last_init 1 --log_dir ./experiments/final_results/non-markovian/TargetTracking-v1_1_07152337/seed_0/ --init_file_path ./experiments/final_results/non-markovian/TargetTracking-v1_1_07152337/seed_0/init_pose.pkl --act_policy egreedy --blocked 1
+
+## Evaluation
+* run evaluation.py
+<!-- 
 ## Running Infoplanner (https://bitbucket.org/brentsc/infoplanner.git)
 A search-based planning method used as a baseline in the above paper, Learning Q-network for Active Information Acquisition, can be used with this library. To use, download and install the InfoPlanner (https://bitbucket.org/brentsc/infoplanner.git) following its installation instruction. Note that it works only with python version 3.5.
 ```
 export PYTHONPATH="${PYTHONPATH}:YOUR-PATH-TO-INFOPLANNER/lib"
 python ttenv/infoplanner_python/run_anytime_planner.py --render 1
-```
+``` -->
 
-## Citing
+<!-- ## Citing
 If you use this repo in your research, you can cite it as follows:
 ```bibtex
 @misc{ttenv,
@@ -81,4 +95,4 @@ If you use this repo in your research, you can cite it as follows:
     publisher = {GitHub},
     journal = {GitHub repository},
     howpublished = {\url{https://github.com/coco66/ttenv.git}},
-}
+} -->
