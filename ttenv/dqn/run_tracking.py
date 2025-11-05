@@ -14,6 +14,7 @@ from models import get_mlp_model, get_deepsetmlp_model
 from deepq import learn, load
 from logger import Logger
 from ttenv.dqn import deepadfq
+from ttenv.dqn.utils import plot_q_values_heatmap
 from ttenv.metadata import METADATA, LEAKAGE_OBS, GAUSSIAN_OBS, METADATA_v1
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -26,7 +27,7 @@ parser.add_argument('--mode', choices=['train', 'test'], default='train')
 parser.add_argument('--dueling', type=int, default=0)
 parser.add_argument('--nb_train_steps', type=int, default=5000)
 parser.add_argument('--buffer_size', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--nb_warmup_steps', type=int, default=100)
 parser.add_argument('--nb_epoch_steps', type=int, default=100)
 parser.add_argument('--target_update_freq', type=float, default=50)  # This should be smaller than epoch_steps
@@ -53,7 +54,7 @@ parser.add_argument('--nb_targets', type=int, default=1)
 parser.add_argument('--eval_type', choices=['random', 'random_zone', 'fixed'], default='random')
 parser.add_argument('--init_file_path', type=str, default=".")
 parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-parser.add_argument('--num_particles', type=int, default=1000)
+parser.add_argument('--num_particles', type=int, default=100)
 parser.add_argument('--im_size', type=int, default=28)
 parser.add_argument('--particle_belief', type=int, default=0)
 parser.add_argument('--reuse_last_init', type=int, default=0)
@@ -65,8 +66,6 @@ parser.add_argument('--noise', type=float, default=1.0)
 parser.add_argument('--blocked', type=int, default=0)
 
 args = parser.parse_args()
-
-
 
 
 def train(seed, save_dir):
@@ -110,7 +109,7 @@ def train(seed, save_dir):
         # 1 for particle weight, 2 for obstacle info, observed info per target
         # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
         #                                 env.env.agent.dim + 2 + args.nb_targets)
-        model_fn = get_deepsetmlp_model(5 * args.nb_targets, 2 + 2 * args.nb_targets + env.env.agent.dim)
+        model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets, 2)
 
     if args.act_policy == "egreedy":
         act = learn(
@@ -239,6 +238,7 @@ def test():
         test_directory_path = args.log_dir + 'test/seed_' + str(seed) + "/"
         if not args.reuse_last_init:
             test_directory_path += "random_init/"
+        test_directory_path += str(METADATA["target_speed_limit"]) + "/" + str(METADATA["lin_dist_range_a2b"][0]) + "/"
         os.makedirs(test_directory_path, exist_ok=True)
         ep = 0
         init_pos = []
@@ -250,7 +250,7 @@ def test():
             given_init_pose = pickle.load(open(args.init_file_path, "rb"))
         episode_discovery_rate_dist = []
         episode_agent_target_dist = []
-        if METADATA["observation_model"]==LEAKAGE_OBS:
+        if METADATA["observation_model"] == LEAKAGE_OBS:
             particle_obs = []
         while (ep < args.nb_test_steps):  # test episode
             ep += 1
@@ -273,21 +273,26 @@ def test():
                                    'belief_targets': [env.belief_targets[i].state for i in
                                                       range(args.nb_targets)]})
             s_time = time.time()
-
+            step_q_vals = []
             while not terminated and not truncated:
-                if seed == args.seed:
-                    if args.render:
-                        env.render(log_dir=test_directory_path)
+                # if seed == args.seed:
+                #     if args.render:
+                #         env.render(log_dir=test_directory_path)
+                if args.render:
+                    env.render(log_dir=test_directory_path)
                 # if args.ros_log:
                 #     ros_log.log(env)
-                action = act(obs, stochastic=False)
+                action,q_vals = act(obs, stochastic=False, ret_q_vals=True)
                 next_obs, rew, terminated, truncated, info = env.step(action)
                 obs = next_obs
                 episode_rew += rew
+                step_q_vals.append(q_vals)
                 nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
+            plot_q_values_heatmap(step_q_vals, test_directory_path +str(ep)+ "_q values.pdf", action_labels=np.round(list(env.action_map.values()), 2))
+            np.savetxt(test_directory_path + "q_vals.csv", np.array(step_q_vals), delimiter=',')
             episode_discovery_rate_dist.append(np.mean([dr / args.nb_epoch_steps for dr in env.discover_cnt]))
             episode_agent_target_dist.append(np.mean(env.agent_target_dist, axis=0))
-            if METADATA["observation_model"]==LEAKAGE_OBS:
+            if METADATA["observation_model"] == LEAKAGE_OBS:
                 particle_obs.append(env.particles_observed)
             time_elapsed.append(time.time() - s_time)
             ep_nlogdetcov.append(nlogdetcov)
@@ -298,8 +303,9 @@ def test():
         np.savetxt(os.path.join(test_directory_path, 'distance_' + str(METADATA["target_speed_limit"]) + '.csv'),
                    np.array(np.round(episode_agent_target_dist, 4)), delimiter=",")
         if METADATA["observation_model"] == LEAKAGE_OBS:
-            np.savetxt(os.path.join(test_directory_path, 'particles_obs_' + str(METADATA["target_speed_limit"]) + '.csv'),
-                       np.array(particle_obs), delimiter=",")
+            np.savetxt(
+                os.path.join(test_directory_path, 'particles_obs_' + str(METADATA["target_speed_limit"]) + '.csv'),
+                np.array(particle_obs), delimiter=",")
         if args.record:
             env.moviewriter.finish()
         # if args.ros_log:
@@ -314,7 +320,6 @@ def test():
                   'w') as f_result:
             f_result.write(tabulate.tabulate([ep_nlogdetcov, time_elapsed], tablefmt='presto'))
         seed += 1
-
 
 
 if __name__ == '__main__':

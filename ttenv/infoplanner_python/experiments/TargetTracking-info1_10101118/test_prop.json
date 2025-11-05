@@ -1,0 +1,1 @@
+{"seed": 0, "n_controls": 100, "render": 1, "record": 0, "map": "empty", "env": "TargetTracking-info1", "ros": 0, "log_dir": "./experiments/", "nb_targets": 1, "repeat": 200}

@@ -19,7 +19,6 @@ from ttenv.metadata import METADATA
 from utils import save_state, load_state
 import matplotlib.pyplot as plt
 
-BATCH_SIZE = 128
 GAMMA = .9
 EPS_START = 0.9
 EPS_END = 0.05
@@ -193,7 +192,10 @@ class PFDQNAgent:
 
         with torch.no_grad():
             q_values = self.model(target_belief, agent_info)
-        return q_values.argmax(dim=1).item()
+        if "ret_q_vals" in kwargs and kwargs["ret_q_vals"]:
+            return q_values.argmax(dim=1).item(),q_values.detach().cpu().numpy().squeeze()
+        else:
+            return q_values.argmax(dim=1).item()
 
     def compute_td_error(self, target_bf_t, agent_info_t, action, reward, target_bf_t1, agent_info_t1, done, gamma):
         """Compute TD-error for a single transition.
@@ -402,7 +404,7 @@ def learn(env,
           checkpoint_freq=10000,
           checkpoint_path=None,
           learning_starts=-1,
-          gamma=.9,
+          gamma=.90,
           target_network_update_freq=100,
           prioritized_replay=False,
           prioritized_replay_alpha=0.6,
@@ -609,13 +611,13 @@ def learn(env,
         # scheduler.step()
 
         # Update target network if it's time
-        if target_network_update_freq < 1:
+        if target_network_update_freq <= 1:
             # Soft target update
-            agent.update_target_network(target_network_update_freq)
+            agent.update_target_network(TAU)
         else:
-            # Hard target update
+            # Hard target update`
             if t != 0 and t % target_network_update_freq == 0:
-                agent.update_target_network(TAU)
+                agent.update_target_network()
 
         # Update priorities in prioritized replay buffer
         if prioritized_replay:
@@ -719,6 +721,7 @@ def learn(env,
                         obs = next_obs
                         if e_e == eval_episodes - 1:
                             env.render(log_dir=rollout_dir)
+
                     eval_episode_rewards.append(eval_episode_reward)
                 eval_returns[1].append(np.mean(eval_episode_rewards))
                 eval_returns[2].append(np.std(eval_episode_rewards))

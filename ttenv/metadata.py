@@ -42,7 +42,7 @@ METADATA_v1={
         # 'ang_dist_range_a2b':(-.1, 0.0),
         # 'lin_dist_range_b2t':(0.0, 1.0),
         # 'ang_dist_range_b2t':(-np.pi/2, np.pi/2),
-        'margin': 1.0, # a marginal distance btw targets and the agent.
+        'margin': 0.0, # a marginal distance btw targets and the agent.
         'margin2wall': 1.0, # a marginal distance from a wall.
         'action_v': [3, 2, 1, 0], # action primitives - linear velocities.
         'action_w': [np.pi/2, 0, -np.pi/2], # action primitives - angular velocities.

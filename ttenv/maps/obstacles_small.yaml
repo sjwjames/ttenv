@@ -1,0 +1,9 @@
+datatype: t
+mapdim: [21, 21]
+mapmax: [21, 21]
+mapmin: [0.0, 0.0]
+mappath: obstacles_small.cfg
+mapres: [1.0,1.0]
+origin: [10.5, 10.5]
+origincells: [11, 11]
+storage: colmajor

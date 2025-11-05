@@ -185,7 +185,28 @@ class TargetTrackingBase(gym.Env):
                     a_init = np.random.random((2,)) * (self.MAP.mapmax - self.MAP.mapmin) + self.MAP.mapmin
                     is_agent_valid = not (self.MAP.is_collision(a_init))
 
+            x_min = self.MAP.mapmin[0]
+            y_min = self.MAP.mapmin[1]
+            x_max = self.MAP.mapmax[0]
+            y_max = self.MAP.mapmax[1]
+            orientation=0.0
+            if min(abs(a_init[1] - y_min), abs(y_max - a_init[1])) < min(abs(a_init[0] - x_min), abs(x_max - a_init[0])):
+                if a_init[1] - y_min > y_max - a_init[1]:
+                    orientation = np.pi/2
+                else:
+                    orientation = -np.pi/2
+
+            else:
+                if a_init[0]-x_min>x_max-a_init[0]:
+                    orientation=0.0
+                else:
+                    orientation=-np.pi
+
+
+
             init_pose['agent'] = [a_init[0], a_init[1], np.random.random() * 2 * np.pi - np.pi]
+            # init_pose['agent'] = [a_init[0], a_init[1], orientation]
+            # init_pose['agent'] = [10.0, 1.0, -np.pi/2]
             init_pose['targets'], init_pose['belief_targets'] = [], []
             for i in range(self.num_targets):
                 count, is_belief_valid = 0, False
@@ -272,8 +293,8 @@ class TargetTrackingBase(gym.Env):
     def observation_noise(self, z):
         # todo can change this to a varying noise
         if METADATA["varying_ob_noise"]:
-            obs_noise_cov = np.array([[.1 * z[0] + 0.05, 0.0],
-                                      [0.0, .1 * z[0] + 0.05]])
+            obs_noise_cov = np.array([[abs(.1 * z[0] + 0.05), 0.0],
+                                      [0.0, abs(.1 * z[1] + 0.05)]])
         else:
             obs_noise_cov = np.array([[self.sensor_r_sd * self.sensor_r_sd, 0.0],
                                       [0.0, self.sensor_b_sd * self.sensor_b_sd]])

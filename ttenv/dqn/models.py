@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ttenv.metadata import DEVICE
+from ttenv.metadata import DEVICE, METADATA
 
 
 class MLP(nn.Module):
@@ -296,7 +296,10 @@ class ParticleDeepSetMLP(nn.Module):
         self.output_dim = output_dim
         hidden_dim = 16
 
-        reg_dim = hidden_dim
+        # concat the agent state
+        reg_dim = hidden_dim+agent_dim
+        #stack the agent state
+        # reg_dim = hidden_dim
         if layer_norm:
             # agent embedding
             # self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.ReLU(),
@@ -328,30 +331,31 @@ class ParticleDeepSetMLP(nn.Module):
                                            nn.Linear(hidden_dim * 2, hidden_dim), nn.ReLU(),
                                            nn.Linear(hidden_dim, output_dim))
 
-    # def forward(self, target_belief, agent):
-    #     agent_batch_size, agent_set_size, agent_input_dim = agent.shape
-    #     agent_reshaped = agent.view(-1, agent_input_dim)
-    #
-    #     batch_size, set_size, input_dim = target_belief.shape
-    #     target_belief_reshaped = target_belief.view(-1, input_dim)
-    #
-    #     agent_rep = self.agent_embedding(agent_reshaped)
-    #     agent_rep = self.phi_func(agent_rep)
-    #     agent_rep = agent_rep.view(agent_batch_size, agent_set_size, -1)
-    #
-    #     target_rep = self.phi_func(target_belief_reshaped)
-    #     target_rep = target_rep.view(batch_size, set_size, -1)
-    #     # sum_pooled = torch.cat((target_rep.sum(dim=1), agent_reshaped), dim=1)
-    #     sum_pooled = torch.cat((target_rep, agent_rep), dim=1).sum(dim=1)
-    #     return self.regressor(sum_pooled)
-
     def forward(self, target_belief, agent):
+        agent_batch_size, agent_set_size, agent_input_dim = agent.shape
+        agent_reshaped = agent.view(-1, agent_input_dim)
+
         batch_size, set_size, input_dim = target_belief.shape
         target_belief_reshaped = target_belief.view(-1, input_dim)
+
+        # agent_rep = self.agent_embedding(agent_reshaped)
+        # agent_rep = self.phi_func(agent_rep)
+        # agent_rep = agent_rep.view(agent_batch_size, agent_set_size, -1)
+
+
         target_rep = self.phi_func(target_belief_reshaped)
         target_rep = target_rep.view(batch_size, set_size, -1)
-        sum_pooled = target_rep.sum(dim=1)
+        sum_pooled = torch.cat((target_rep.sum(dim=1), agent_reshaped), dim=1)
+        # sum_pooled = torch.cat((target_rep, agent_rep), dim=1).sum(dim=1)
         return self.regressor(sum_pooled)
+
+    # def forward(self, target_belief, agent):
+    #     batch_size, set_size, input_dim = target_belief.shape
+    #     target_belief_reshaped = target_belief.view(-1, input_dim)
+    #     target_rep = self.phi_func(target_belief_reshaped)
+    #     target_rep = target_rep.view(batch_size, set_size, -1)
+    #     sum_pooled = target_rep.sum(dim=1)
+    #     return self.regressor(sum_pooled)
 
 
 def get_mlp_model(input_dim, hiddens=[], layer_norm=False):
