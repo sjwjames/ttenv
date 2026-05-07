@@ -470,6 +470,17 @@ class TargetTrackingEnv1(TargetTrackingBase):
                 self.belief_targets[i].state[2:],
                 self.agent.state[:2], self.agent.state[2],
                 action_vw[0], action_vw[1])
+            # self.state.extend([r_b, alpha_b, r_dot_b, alpha_dot_b,
+            #                    np.log(LA.det(self.belief_targets[i].cov)),
+            #                    float(observed[i])])
+            # r_b, alpha_b = util.relative_distance_polar(self.targets[i].state[:2],
+            #                                             xy_base=self.agent.state[:2],
+            #                                             theta_base=self.agent.state[2])
+            # r_dot_b, alpha_dot_b = util.relative_velocity_polar(
+            #     self.targets[i].state[:2],
+            #     self.targets[i].state[2:],
+            #     self.agent.state[:2], self.agent.state[2],
+            #     action_vw[0], action_vw[1])
             self.state.extend([r_b, alpha_b, r_dot_b, alpha_dot_b,
                                np.log(LA.det(self.belief_targets[i].cov)),
                                float(observed[i])])
@@ -572,7 +583,10 @@ class TargetTrackingEnv1(TargetTrackingBase):
         c_mean = 0.1
         c_std = 0.0
         c_penalty = 1.0
-        reward = c_mean * r_detcov_mean + c_std * r_detcov_std
+        # reward = c_mean * r_detcov_mean + c_std * r_detcov_std
+        reward = np.sum([(self.last_ents[i] - bf.entropy()) / (np.linalg.norm(
+            np.array(bf.state[:2]) - np.array(self.agent.state[:2])) + 0.001) for i, bf in
+                         enumerate(self.belief_targets)])
         if "is_col" in kwargs.keys() and kwargs["is_col"]:
             reward = min(0.0, reward) - c_penalty * 1.0
         return reward, False, r_detcov_mean, r_detcov_std
@@ -581,10 +595,10 @@ class TargetTrackingEnv1(TargetTrackingBase):
         # detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
         # normed_ent_reward = - np.mean(np.log(detcov))/self.max_ent
         # ob_reward = np.sum([float(ob) for ob in kwargs["observed"]])
-        # reward = normed_ent_reward + ob_reward
-        # # reward = np.sum([float(ob) for ob in kwargs["observed"]])
+        # # reward = normed_ent_reward + ob_reward
+        # reward = np.sum([float(ob) for ob in kwargs["observed"]])
         # if "is_col" in kwargs.keys() and kwargs["is_col"]:
-        #     reward = reward - 1.0*c_penalty
+        #     reward = - 1.0*c_penalty
         # return reward,False, 0, 0
 
         # reward = np.sum([(self.last_ents[i] - bf.entropy()) / np.linalg.norm(
@@ -624,7 +638,9 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         # Build an agent, targets, and beliefs.
         self.build_models(const_q=METADATA['const_q'], known_noise=known_noise)
         self.discover_cnt = [0 for _ in range(self.num_targets)]
-
+        self.ds_mode = "perm_inv"
+        if 'ds_mode' in kwargs:
+            self.ds_mode = kwargs['ds_mode']
     def reset(self, **kwargs):
         # Always set the limits first.
         if 'target_speed_limit' in kwargs:
@@ -643,7 +659,6 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         for i in range(self.num_targets):
             self.belief_targets[i].reset(self.prior_dists[i])
             self.targets[i].reset(np.concatenate((init_pose['targets'][i][:2], self.target_init_vel)))
-
         # The targets are observed by the agent (z_0) and the beliefs are updated (b_0).
         observed = self.observe_and_update_belief()
         self.last_est_dists = [np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for bf in
@@ -651,13 +666,13 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         self.last_ents = [bf.entropy() for bf in self.belief_targets]
         self.agent_target_dist = [[] for _ in range(self.num_targets)]
         self.max_ent = np.log(np.prod(np.array(self.limit["target"][1]) - np.array(self.limit["target"][0])))
+
         # Compute the RL state.
         self.state_func([0.0, 0.0], observed)
 
         # Predict the target for the next step, b_1|0.
         for i in range(self.num_targets):
             self.belief_targets[i].predict()
-
         return self.state
 
     def step(self, action):
@@ -673,10 +688,12 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
 
         self.last_est_dists = [np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for bf in
                                self.belief_targets]
-        self.last_ents = [bf.entropy() for bf in self.belief_targets]
+
         for i in range(self.num_targets):
             self.agent_target_dist[i].append(
                 np.linalg.norm(np.array(self.targets[i].state[:2]) - np.array(self.agent.state[:2])))
+
+        self.last_ents = [bf.entropy() for bf in self.belief_targets]
         # The targets are observed by the agent (z_t+1) and the beliefs are updated.
         observed = self.observe_and_update_belief()
 
@@ -685,6 +702,7 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
                                                                         is_col=is_col, observed=observed)
         # reward, done, mean_nlogdetcov, std_nlogdetcov = self.get_reward(self.is_training,
         #                                                                 is_col=is_col)
+
         # Compute the RL state.
         self.state_func(action_vw, observed)
 
@@ -692,19 +710,43 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         for i in range(self.num_targets):
             self.belief_targets[i].predict()
 
+
+
         return self.state, reward, False, False, {'mean_nlogdetcov': mean_nlogdetcov, 'std_nlogdetcov': std_nlogdetcov}
 
     def state_func(self, action_vw, observed):
+        geom_ob_rep_flag = False
         # Find the closest obstacle coordinate.
-        obstacles_pt = self.MAP.get_closest_obstacle(self.agent.state)
-        if obstacles_pt is None:
-            obstacles_pt = (self.sensor_r, np.pi)
+        if not geom_ob_rep_flag:
+            obstacles_pt = self.MAP.get_closest_obstacle(self.agent.state)
+            if obstacles_pt is None:
+                obstacles_pt = (self.sensor_r, np.pi)
+        else:
+            observable_shape = self.MAP.get_fov_shape(self.agent.fov_polygon)
+            if observable_shape.geom_type == "Polygon":
+                obstacles_pt = np.array(observable_shape.exterior.coords).reshape(-1, 1).squeeze()
+            elif observable_shape.geom_type == "MultiPolygon":
+                obstacles_pt = np.array([])
+                for item in observable_shape.geoms:
+                    obstacles_pt = np.append(obstacles_pt, np.array(item.exterior.coords).reshape(-1, 1).squeeze())
+            if len(obstacles_pt) < METADATA['fov_poly_observable_seg'] * 2:
+                if len(obstacles_pt) < 2:
+                    obstacles_pt = np.array([0.0, 0.0] * METADATA['fov_poly_observable_seg'])
+                else:
+                    obstacles_pt = np.append(obstacles_pt, [obstacles_pt[-2], obstacles_pt[-1]] * (
+                            (METADATA['fov_poly_observable_seg'] * 2 - len(obstacles_pt)) // 2))
+
+            obstacles_pt = np.array([util.relative_distance_polar([obstacles_pt[i * 2], obstacles_pt[i * 2 + 1]],
+                                                                  xy_base=self.agent.state[:2],
+                                                                  theta_base=self.agent.state[2])
+                                     for i in range(METADATA['fov_poly_observable_seg'])]).reshape(-1, 1).squeeze()
         # linear_dist_bins = np.arange(1,100,2)
         # angular_dist_bins = np.arange(-np.pi,np.pi,.5)
         # obstacles_pt = (np.digitize(obstacles_pt[0],linear_dist_bins),np.digitize(obstacles_pt[1],angular_dist_bins))
         self.state = {}
         particle_list = []
         observed_list = []
+        g_state = False
         for i in range(self.num_targets):
             # r_b, alpha_b = util.relative_distance_polar(self.belief_targets[i].state[:2],
             #                                             xy_base=self.agent.state[:2],
@@ -724,24 +766,31 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
             #         action_vw[0], action_vw[1]),angular_dist_bins)) for x, y in
             #                   zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
 
-            particle_list += [[x] + list(util.relative_distance_polar(y[:2],
-                                                                      xy_base=self.agent.state[:2],
-                                                                      theta_base=self.agent.state[2])) + list(
-                util.relative_velocity_polar(
-                    y[:2],
-                    y[2:],
-                    self.agent.state[:2], self.agent.state[2],
-                    action_vw[0], action_vw[1])) for x, y in
-                              zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
-
-
+            if g_state:
+                particle_list += [[x] + list(y) for x, y in
+                                  zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
+            else:
+                particle_list += [[x] + list(util.relative_distance_polar(y[:2],
+                                                                          xy_base=self.agent.state[:2],
+                                                                          theta_base=self.agent.state[2])) + list(
+                    util.relative_velocity_polar(
+                        y[:2],
+                        y[2:],
+                        self.agent.state[:2], self.agent.state[2],
+                        action_vw[0], action_vw[1])) for x, y in
+                                  zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
+                # particle_list += [[x] + list(util.relative_distance_polar(y[:2],
+                #                                                           xy_base=self.agent.state[:2],
+                #                                                           theta_base=self.agent.state[2])) for x, y in
+                #                   zip(self.belief_targets[i].weights, self.belief_targets[i].states)]
 
             #
-            # observed_list = np.concatenate((observed_list, [LA.det(self.belief_targets[i].cov)]))
-            # observed_list = np.concatenate((observed_list, [float(observed[i])]))
+            observed_list = np.concatenate((observed_list, [LA.det(self.belief_targets[i].cov)]))
+            observed_list = np.concatenate((observed_list, [float(observed[i])]))
 
         observed_list = np.concatenate((observed_list, obstacles_pt))
-        # observed_list = np.concatenate((observed_list, self.agent.state))
+        if g_state:
+            observed_list = np.concatenate((observed_list, self.agent.state))
         self.state = {"target": torch.tensor(np.array(particle_list), dtype=torch.float32, device=DEVICE).unsqueeze(0),
                       "agent": torch.tensor(np.array([observed_list]), dtype=torch.float32, device=DEVICE).unsqueeze(0)}
 
@@ -759,6 +808,10 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
                 self.discover_cnt[i] += 1
                 if not (self.has_discovered[i]):
                     self.has_discovered[i] = 1
+            else:
+                if self.ds_mode=="perm_equiv":
+                    self.belief_targets[i].filter()
+
         return observed
 
     def set_limits(self, target_speed_limit=None):
@@ -806,6 +859,10 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         #     dists.append(prior_gmm)
         # self.prior_dists = dists
         # return dists
+
+        # dists = [GaussianDistribution(np.concatenate((init_pose['belief_targets'][i][:2], np.zeros(2))),
+        #                               np.eye(self.target_dim) * self.target_init_cov) for i in range(self.num_targets)]
+
         dists = [GaussianDistribution(np.concatenate((init_pose['belief_targets'][i][:2], np.zeros(2))),
                                       np.eye(self.target_dim) * self.target_init_cov) for i in range(self.num_targets)]
         return dists
@@ -819,7 +876,8 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         # Build a robot
         # CirclePolicy(self.sampling_period, self.MAP.origin, 3.0)
         self.agent = AgentSE2(dim=3, sampling_period=self.sampling_period, limit=self.limit['agent'],
-                              collision_func=lambda x: self.MAP.is_collision(x))
+                              collision_func=lambda x: self.MAP.is_collision(x),
+                              policy=CirclePolicy(self.sampling_period, self.MAP.origin, 3.0))
         # Build targets
         self.targetA = np.concatenate((np.concatenate((np.eye(2),
                                                        self.sampling_period * np.eye(2)), axis=1),
@@ -849,14 +907,18 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
                                                        x, fov=2 * np.pi, r_max=10e2))
                         for _ in range(self.num_targets)]
 
+
+
         self.belief_targets = [
             PFbelief(dim=self.target_dim, limit=self.limit['target'], transition_func=self.target_transition,
                      n=self.n_particles, effective_n=self.n_particles // 2, dim_z=2,
                      obs_noise_func=self.observation_noise,
                      collision_func=lambda x: self.MAP.is_collision(x),
                      obs_check_func=lambda x: self.MAP.get_closest_obstacle(
-                         x, fov=2 * np.pi, r_max=10e2), sampling_period=self.sampling_period)
-            for _ in range(self.num_targets)]
+                         x, fov=2 * np.pi, r_max=10e2),
+                     observation_func=self.observation,
+                     sampling_period=self.sampling_period)
+            for i in range(self.num_targets)]
         # self.belief_targets = [
         #     AuxiliaryPFbelief(dim=self.target_dim, limit=self.limit['target'], transition_func=self.target_transition,
         #                       n=self.n_particles, effective_n=self.n_particles // 2, dim_z=2,
@@ -867,16 +929,24 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         #     for _ in range(self.num_targets)]
 
     def get_reward(self, is_training=True, **kwargs):
-        # reward = np.sum([1 / (np.linalg.norm(
-        #     np.array(bf.state[:2]) - np.array(self.agent.state[:2])) + 0.001) for i, bf in
-        #                  enumerate(self.belief_targets)])
-        # return reward, False, 0, 0
-
-        # reward = np.sum([self.last_ents[i] - bf.entropy() for i, bf in
-        #                  enumerate(self.belief_targets)])
-        # return reward, False, 0, 0
+        detcov = [LA.det(b_target.cov) for i, b_target in enumerate(self.belief_targets)]
+        r_detcov_mean = - np.mean(np.log(detcov))
+        # r_detcov_mean = np.mean([self.last_ents[i] - bf.entropy() for i, bf in
+        #                          enumerate(self.belief_targets)])
+        r_detcov_std = - np.std(np.log(detcov))
+        c_mean = 0.1
+        c_std = 0.0
         c_penalty = 1.0
-        # if self.observation_model==LEAKAGE_OBS:
+        # reward = c_mean * r_detcov_mean + c_std * r_detcov_std
+        reward = np.sum([(self.last_ents[i] - bf.entropy()) / (np.linalg.norm(
+            np.array(bf.state[:2]) - np.array(self.agent.state[:2])) + 0.001) for i, bf in
+                         enumerate(self.belief_targets)])
+        if "is_col" in kwargs.keys() and kwargs["is_col"]:
+            reward = min(0.0, reward) - c_penalty * 1.0
+        return reward, False, r_detcov_mean, r_detcov_std
+
+        # c_penalty = 1.0
+        # if self.observation_model == LEAKAGE_OBS:
         #     reward = np.sum([self.last_ents[i] - bf.entropy() for i, bf in
         #                      enumerate(self.belief_targets)])
         #     # ob_reward = np.sum([self.observation(target)[1] for target in self.targets])
@@ -888,131 +958,20 @@ class TargetTrackingEnv1_1(TargetTrackingBase):
         #         reward = reward - 1.0 * c_penalty
         #     return reward, False, r_detcov_mean, r_detcov_std
         # else:
-        #     c_penalty = 1.0
-        #     mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
+        #
+        #     mis = [(self.last_ents[i] - b_target.entropy()) for i, b_target in
+        #            enumerate(self.belief_targets)]
+        #     # mis = [ 1 / np.linalg.norm(
+        #     #     np.array(b_target.state[:2]) - np.array(self.agent.state[:2])) for i, b_target in
+        #     #        enumerate(self.targets)]
         #     detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
         #     r_detcov_mean = - np.mean(np.log(detcov))
         #     r_detcov_std = - np.std(np.log(detcov))
-        #     normed_ent_reward = np.mean(mis) / self.max_ent
-        #     ob_reward = np.sum([float(ob) for ob in kwargs["observed"]])
-        #     reward = normed_ent_reward + ob_reward
+        #     reward = np.mean(mis)
         #     # reward = np.sum([float(ob) for ob in kwargs["observed"]])
         #     if "is_col" in kwargs.keys() and kwargs["is_col"]:
         #         reward = reward - 1.0 * c_penalty
-        #     return reward, False, r_detcov_mean,r_detcov_std
-        # mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
-        mis = [self.last_ents[i] - b_target.entropy() for i, b_target in enumerate(self.belief_targets)]
-        detcov = [LA.det(b_target.cov) for b_target in self.belief_targets]
-        r_detcov_mean = - np.mean(np.log(detcov))
-        r_detcov_std = - np.std(np.log(detcov))
-        # normed_ent_reward = np.mean(mis) / self.max_ent
-        # ob_reward = np.sum([float(ob) for ob in kwargs["observed"]])
-        # reward = normed_ent_reward + ob_reward
-        # reward = np.mean(mis)
-        # reward = ob_reward
-        reward = np.sum([float(ob) for ob in kwargs["observed"]])
-        if "is_col" in kwargs.keys() and kwargs["is_col"]:
-            reward = - 1.0 * c_penalty
-        return reward, False, r_detcov_mean, r_detcov_std
-
-        # xy_target_base = [util.transform_2d(bs.state[:2], self.agent.state[2], self.agent.state[:2]) for bs in
-        #                   self.belief_targets]
-        # min_dist_to_perfect = .05
-        # m_reward = 1.0 / min_dist_to_perfect
-        # reward = np.sum(
-        #         [m_reward if kwargs["observed"][i] else self.last_ents[i] - self.belief_targets[i].entropy() / np.clip(LA.norm(np.array(xy_target_base[i]) - np.array([5, 0])), min_dist_to_perfect, np.inf)
-        #          for i in range(len(xy_target_base))])
-
-    #     c_mean = 0.1
-    #     c_std = 0.0
-    #     c_penalty = 1.0
-    #     detcov = np.array([LA.det(b_target.cov) for b_target in self.belief_targets])
-    #     detcov[np.where(detcov <= 0)] = 10 ** -9
-    #     r_detcov_mean = - np.mean(np.log(detcov))
-    #     r_detcov_std = - np.std(np.log(detcov))
-    #
-    #     reward = c_mean * r_detcov_mean + c_std * r_detcov_std
-    #     reward = min(0.0, reward) - c_penalty * 1.0
-    #
-    #     return reward, False, r_detcov_mean, r_detcov_std
-
-    # def get_reward(self, is_training=True, **kwargs):
-    #     reward = np.sum([float(ob) for ob in kwargs["observed"]])
-    # #     xy_target_base = [util.transform_2d(bs.state[:2], self.agent.state[2], self.agent.state[:2]) for bs in
-    # #                       self.belief_targets]
-    # #     min_dist_to_perfect = .05
-    # #     m_reward = 1.0 / min_dist_to_perfect
-    # #     reward = np.sum(
-    # #         [m_reward if ob else 1 / np.clip(LA.norm(np.array(xy) - np.array([5, 0])), min_dist_to_perfect, np.inf) for
-    # #          ob, xy in
-    # #          zip(kwargs["observed"], xy_target_base)])
-    #     return reward, False, 0,0
-    # reward = np.sum(
-    #     [-LA.norm(np.array(bs.state[:2]) - np.array(self.agent.state[:2])) for bs in self.targets])
-    # return reward, False, 0, 0
-    # if "observed" in kwargs:
-    #     max_d = np.sqrt(
-    #         (self.MAP.mapmax[0] - self.MAP.mapmin[0]) ** 2 + (self.MAP.mapmax[1] - self.MAP.mapmin[1]) ** 2)
-    #     reward = np.sum([1.0 - (np.linalg.norm(
-    #         np.array(self.belief_targets[i].state[:2]) - np.array(self.agent.state[:2]))) / max_d if not ob else 1.0
-    #                      for i, ob in enumerate(kwargs["observed"])])
-    # else:
-    #     reward = np.sum(
-    #         [self.last_est_dists[i] - np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for
-    #          i, bf in enumerate(self.belief_targets)])
-    # reward = np.sum([(self.last_ents[i] - bf.entropy()) / np.linalg.norm(
-    #     np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for i, bf in
-    #                  enumerate(self.belief_targets)])
-    # reward = np.sum(
-    #     [self.last_est_dists[i] - np.linalg.norm(np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for i, bf
-    #      in enumerate(self.belief_targets)])
-    # reward = np.sum([(self.last_ents[i] - bf.entropy()) / np.linalg.norm(
-    #     np.array(bf.state[:2]) - np.array(self.agent.state[:2])) for i, bf in
-    #                  enumerate(self.belief_targets)])
-    # reward = np.sum([-np.linalg.norm(np.array(self.belief_targets[i].state[:2]) - np.array(self.agent.state[:2])) if not ob else 100.0 for i, ob in enumerate(kwargs["observed"])])
-    # return reward, False, 0,0
-    # observability = []
-    # for bs in self.belief_targets:
-    #     ob_cnt = 0.0
-    #     unob_cnt = 0.0
-    #     for w,p in zip(bs.weights,bs.states):
-    #         r,alpha = util.relative_distance_polar(p[:2],
-    #                                      xy_base=self.agent.state[:2],
-    #                                      theta_base=self.agent.state[2])
-    #         observed = (r <= self.sensor_r) \
-    #                    & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
-    #                    & (not (self.MAP.is_blocked(self.agent.state, p)))
-    #         if observed:
-    #             ob_cnt +=w
-    #         else:
-    #             unob_cnt+=w
-    #
-    #     observability.append((ob_cnt,unob_cnt))
-    # r, alpha = util.relative_distance_polar(bs.state[:2],
-    #                                         xy_base=self.agent.state[:2],
-    #                                         theta_base=self.agent.state[2])
-    # observed = (r <= self.sensor_r) \
-    #            & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
-    #            & (not (self.MAP.is_blocked(self.agent.state, bs.state)))
-    # if observed:
-    #     observability.append(1)
-    # else:
-    #     observability.append(0)
-    # c_mean = 0.1
-    # c_std = 0.0
-    # c_penalty = 1.0
-
-    # detcov = np.array([LA.det(bs.cov)/LA.det(self.observation_noise(())) for bs in self.belief_targets])
-    # detcov[np.where(detcov <= 0)] = 10 ** -9
-    # r_detcov_mean = - np.mean(np.log(detcov))
-    # r_detcov_std = - np.std(np.log(detcov))
-    #
-    # reward = c_mean * r_detcov_mean + c_std * r_detcov_std
-    # reward = min(0.0, reward) - c_penalty * 1.0
-
-    # return reward, False, r_detcov_mean, r_detcov_std
-    # reward = np.sum([1-ob[1] for ob in observability])
-    # return reward, False, 0, 0
+        #     return reward, False, r_detcov_mean, r_detcov_std
 
 
 class TargetTrackingEnv2(TargetTrackingEnv0):

@@ -268,9 +268,9 @@ class LinearGaussianDistribution:
                 return np.random.multivariate_normal(np.matmul(self.coefficient, x) + self.noise_mean, self.noise_var,
                                                      n).squeeze()
             else:
-                return np.array([
+                return np.reshape([
                     np.random.multivariate_normal(np.matmul(self.coefficient, x[i]) + self.noise_mean, self.noise_var,
-                                                  1) for i in range(n)]).squeeze()
+                                                  1) for i in range(n)],[n,np.shape(x)[1]])
         else:
             return np.random.normal(self.coefficient * x + self.noise_mean, np.sqrt(self.noise_var), n)
 

@@ -28,14 +28,16 @@ METADATA_v1={
         'version' : 1,
         'sensor_r': 10.0,
         'fov' : 120,
+        'fov_poly_seg':100,
+        'fov_poly_observable_seg':10,
         'sensor_r_sd': 0.2, # sensor range noise.
-        'sensor_b_sd': 0.01, # sensor bearing noise.
+        'sensor_b_sd': 0.01, # sensor bearing noise se.
         'target_init_cov': 30.0, # initial target diagonal Covariance.
         'target_init_vel': [0.0, 0.0], # target's initial velocity.
         'target_speed_limit': 0.1, # velocity limit of targets.
-        'lin_dist_range_a2b':(10.0, 11.0),
+        'lin_dist_range_a2b':(40.0, 41.0),
         'ang_dist_range_a2b':(-np.pi, np.pi),
-        'lin_dist_range_b2t':(0.0, 1.0),
+        'lin_dist_range_b2t':(1.0, 2.0),
         'ang_dist_range_b2t':(-np.pi/2, np.pi/2),
         # 'target_speed_limit': .1,
         # 'lin_dist_range_a2b':(10.0, 11.0),
@@ -48,7 +50,7 @@ METADATA_v1={
         'action_w': [np.pi/2, 0, -np.pi/2], # action primitives - angular velocities.
         'const_q': 0.5, # target noise constant in beliefs.
         'const_q_true': 0.01, # target noise constant of actual targets.
-        'observation_model': GAUSSIAN_OBS,
+        'observation_model': LEAKAGE_OBS,
         'varying_ob_noise':False
     }
 
@@ -123,4 +125,4 @@ DEVICE = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
-
+# DEVICE = torch.device("cpu")

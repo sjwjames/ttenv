@@ -15,6 +15,7 @@ The following models are included:
 import numpy as np
 from ttenv.metadata import METADATA
 import ttenv.util as util
+from shapely.geometry import Polygon, Point, LineString, box, shape
 
 
 class Agent(object):
@@ -90,7 +91,8 @@ class AgentDoubleInt2D_Nonlinear(AgentDoubleInt2D):
         return is_col
 
     # function for the ukf calculation
-    def fx(self, x, dt):
+    def fx(self, x, dt=None):
+        dt = dt if dt is not None else self.sampling_period
         new_state = np.matmul(self.A, x[:self.dim])
         if self.W is not None:
             noise_sample = np.random.multivariate_normal(np.zeros(self.dim, ), self.W)
@@ -206,6 +208,7 @@ class AgentSE2(Agent):
         self.vw = [0.0, 0.0]
         if self.policy:
             self.policy.reset(init_state)
+        self.fov_polygon = self.create_fov_sector(METADATA['fov_poly_seg'])
 
     def update(self, control_input=None, margin_pos=None, col=False):
         """
@@ -238,8 +241,49 @@ class AgentSE2(Agent):
         self.state = new_state
         self.vw = control_input
         self.range_check()
-
+        self.fov_polygon = self.create_fov_sector(METADATA['fov_poly_seg'])
         return is_col
+
+    def create_fov_sector(self, num_segments=100):
+        """
+        Creates a shapely Polygon representing a circular sector (Field of View).
+
+        :param start_angle_degrees: The start angle in degrees (e.g., 0 for right).
+        :param end_angle_degrees: The end angle in degrees (e.g., 90 for top).
+        :param num_segments: The number of linear segments to approximate the arc.
+        :return: a shapely Polygon object.
+        """
+        # Ensure angles are within 0 to 360 degrees
+        fov_radian = METADATA['fov'] / 180 * np.pi
+
+        start_angle_degrees = (self.state[2] - fov_radian / 2) / np.pi * 180 % 360
+        end_angle_degrees = (self.state[2] + fov_radian / 2) / np.pi * 180 % 360
+
+        center_x = self.state[0]
+        center_y = self.state[1]
+        radius = METADATA['sensor_r']
+        # If the end angle is less than the start angle, it means the arc crosses the 0/360 boundary.
+        # Adjust the end angle to be greater than the start angle for linspace to work correctly.
+        if end_angle_degrees < start_angle_degrees:
+            end_angle_degrees += 360
+
+        # Generate angles in radians
+        theta = np.radians(np.linspace(start_angle_degrees, end_angle_degrees, num_segments))
+
+        # Calculate coordinates for the arc points using trigonometry
+        x = center_x + radius * np.cos(theta)
+        y = center_y + radius * np.sin(theta)
+
+        # Combine x and y coordinates into a list of tuples
+        arc_coords = np.column_stack([x, y])
+
+        # Create the sequence of points for the polygon, including the center point
+        polygon_coords = [(center_x, center_y)] + list(arc_coords) + [(center_x, center_y)]
+
+        # Create the Polygon object
+        fov_polygon = Polygon(polygon_coords)
+
+        return fov_polygon
 
 
 class Agent2DFixedPath(Agent):

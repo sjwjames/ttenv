@@ -8,7 +8,7 @@ from ttenv.metadata import METADATA
 
 
 def plot_tracking_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, seed_cnt, file_dir, speed_limits,
-                       distances):
+                       distances, display):
     pfds_data = []
     adfq_data = []
     dqn_data = []
@@ -31,19 +31,18 @@ def plot_tracking_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs,
                 d3 = np.loadtxt(pfdqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
                                 delimiter=',')
                 d3_res = np.concatenate((d3_res, d3))
-
-                # d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
-                #                 delimiter=',')
-                # d4_res = np.concatenate((d4_res, d4))
-                # d5 = np.loadtxt(
-                #     mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
-                #     delimiter=',')
-                # d5_res = np.concatenate((d5_res, d5))
+                d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
+                                delimiter=',')
+                d4_res = np.concatenate((d4_res, d4))
+                d5 = np.loadtxt(
+                    mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
+                    delimiter=',')
+                d5_res = np.concatenate((d5_res, d5))
             adfq_data.append([np.mean(d1_res), np.std(d1_res)])
             dqn_data.append([np.mean(d2_res), np.std(d2_res)])
             pfds_data.append([np.mean(d3_res), np.std(d3_res)])
-            # mc_data.append([np.mean(d4_res), np.std(d4_res)])
-            # mc_greedy_data.append([np.mean(d5_res), np.std(d5_res)])
+            mc_data.append([np.mean(d4_res), np.std(d4_res)])
+            mc_greedy_data.append([np.mean(d5_res), np.std(d5_res)])
 
     pfds_data = np.array(pfds_data)
     dqn_data = np.array(dqn_data)
@@ -55,13 +54,18 @@ def plot_tracking_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs,
     else:
         x = distances
     fig, ax = plt.subplots(figsize=(8, 6))
-    # ax.errorbar(x, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
-    #             label='ADFQ')  # Use fmt for line and markers
-    # ax.errorbar(x, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='DQN')
-    ax.errorbar(x, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
-    # ax.errorbar(x, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='MC')
-    # ax.errorbar(x, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
-    #             label='Infotaxis')
+    if display[0]:
+        ax.errorbar(x, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                    label='ADFQ')  # Use fmt for line and markers
+    if display[1]:
+        ax.errorbar(x, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+    if display[2]:
+        ax.errorbar(x, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
+    if display[3]:
+        ax.errorbar(x, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+    if display[4]:
+        ax.errorbar(x, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
+                    label='Infotaxis')
     if len(speed_limits) > 1:
         # Add labels, title, and legend
         ax.set_xlabel('Target Speed')
@@ -136,13 +140,13 @@ def plot_distancefigures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dir
     mc_data = np.squeeze(mc_data)
     mc_greedy_data = np.squeeze(mc_greedy_data)
 
-    x = np.arange(len(dqn_data[0]))+1
+    x = np.arange(len(dqn_data[0])) + 1
     fig, ax = plt.subplots(figsize=(8, 6))
-    # ax.errorbar(speed_limits, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
-    #             label='ADFQ')  # Use fmt for line and markers
+    ax.errorbar(speed_limits, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                label='ADFQ')  # Use fmt for line and markers
     ax.plot(x, dqn_data[0], color='g', label='DQN')
-    # ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
-    ax.errorbar(x, mc_data[0], color='c', label='MC')
+    ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
+    ax.errorbar(x, mc_data[0], color='c', label='Q-AIA')
     ax.errorbar(x, mc_greedy_data[0], color='m',
                 label='Infotaxis')
     plt.fill_between(x, dqn_data[0] - dqn_data[1], dqn_data[0] + dqn_data[1], color='g',
@@ -163,7 +167,7 @@ def plot_distancefigures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dir
 
 
 def plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, seed_cnt, file_dir, speed_limits,
-                        distances):
+                        distances, display):
     pfds_data = []
     adfq_data = []
     dqn_data = []
@@ -186,13 +190,12 @@ def plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs
                 d3 = np.loadtxt(pfdqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
                                 delimiter=',')
                 d3_res.append(len(d3[d3 > 0.0]) / 10.0)
-
-                # d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
-                #                 delimiter=',')
-                # d4_res.append(len(d4[d4 > 0.0]) / 10.0)
-                # d5 = np.loadtxt(mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
-                #                 delimiter=',')
-                # d5_res.append(len(d5[d5 > 0.0]) / 10.0)
+                d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
+                                delimiter=',')
+                d4_res.append(len(d4[d4 > 0.0]) / 10.0)
+                d5 = np.loadtxt(mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'discovery_' + str(sl) + '.csv',
+                                delimiter=',')
+                d5_res.append(len(d5[d5 > 0.0]) / 10.0)
             adfq_data.append([np.mean(d1_res), np.std(d1_res)])
             dqn_data.append([np.mean(d2_res), np.std(d2_res)])
             pfds_data.append([np.mean(d3_res), np.std(d3_res)])
@@ -208,13 +211,18 @@ def plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs
     else:
         x = distances
     fig, ax = plt.subplots(figsize=(8, 6))
-    # ax.errorbar(x, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
-    #             label='ADFQ')  # Use fmt for line and markers
-    # ax.errorbar(x, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='DQN')
-    ax.errorbar(x, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
-    # ax.errorbar(x, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='MC')
-    # ax.errorbar(x, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
-    #             label='Infotaxis')
+    if display[0]:
+        ax.errorbar(x, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                    label='ADFQ')  # Use fmt for line and markers
+    if display[1]:
+        ax.errorbar(x, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+    if display[2]:
+        ax.errorbar(x, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
+    if display[3]:
+        ax.errorbar(x, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+    if display[4]:
+        ax.errorbar(x, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
+                    label='Infotaxis')
     if len(speed_limits) > 1:
         # Add labels, title, and legend
         ax.set_xlabel('Target Speed')
@@ -230,7 +238,7 @@ def plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs
 
 
 def plot_test_results(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, seed_cnt, file_dir, speed_limits,
-                      distances):
+                      distances, display):
     pfds_data_means = [[], []]
     adfq_data_means = [[], []]
     dqn_data_means = [[], []]
@@ -318,16 +326,21 @@ def plot_test_results(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, 
         width = 2
     fig, axes = plt.subplots(figsize=(8, 6))
     axes.set_xticks(x)
-    axes.bar(x - 1.5 * width, adfq_data_means[0], width, yerr=adfq_data_stds[0],
-             capsize=5, label="ADFQ", color="tab:red")
-    axes.bar(x - .5 * width, dqn_data_means[0], width, yerr=dqn_data_stds[0],
-             capsize=5, label="DQN", color="tab:green")
-    # axes.bar(x, pfds_data_means[0], width, yerr=pfds_data_stds[0],
-    #          capsize=5, label="DPBQN", color="tab:blue")
-    axes.bar(x + .5 * width, mc_data_means[0], width, yerr=mc_data_stds[0],
-             capsize=5, label="MC", color="tab:cyan")
-    axes.bar(x + 1.5 * width, mc_greedy_data_means[0], width, yerr=mc_greedy_data_stds[0],
-             capsize=5, label="Infotaxis", color="tab:purple")
+    if display[0]:
+        axes.bar(x - 1.5 * width, adfq_data_means[0], width, yerr=adfq_data_stds[0],
+                 capsize=5, label="ADFQ", color="tab:red")
+    if display[1]:
+        axes.bar(x - 1. * width, dqn_data_means[0], width, yerr=dqn_data_stds[0],
+                 capsize=5, label="Gaussian DQN", color="tab:green")
+    if display[2]:
+        axes.bar(x, pfds_data_means[0], width, yerr=pfds_data_stds[0],
+                 capsize=5, label="DPBQN", color="tab:blue")
+    if display[3]:
+        axes.bar(x + 1. * width, mc_data_means[0], width, yerr=mc_data_stds[0],
+                 capsize=5, label="DPBQN-PADS", color="tab:cyan")
+    if display[4]:
+        axes.bar(x + 1.5 * width, mc_greedy_data_means[0], width, yerr=mc_greedy_data_stds[0],
+                 capsize=5, label="Infotaxis", color="tab:purple")
 
     if len(speed_limits) > 1:
         axes.set_xlabel("Target Speed Limit")
@@ -339,31 +352,44 @@ def plot_test_results(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, 
     plt.savefig(file_dir + "LogDetCov.pdf")
 
     fig, axes = plt.subplots(figsize=(8, 6), )
-    axes.bar(x - 1.5 * width, adfq_data_means[1], width, yerr=adfq_data_stds[1],
-             capsize=5, label="ADFQ", color="tab:red")
-    axes.bar(x - .5 * width, dqn_data_means[1], width, yerr=dqn_data_stds[1],
-             capsize=5, label="DQN", color="tab:green")
-    # axes.bar(x, pfds_data_means[1], width, yerr=pfds_data_stds[1],
-    #          capsize=5, label="DPBQN", color="tab:blue")
+    if display[0]:
+        axes.bar(x - 1.5 * width, adfq_data_means[1], width, yerr=adfq_data_stds[1],
+                 capsize=5, label="ADFQ", color="tab:red")
+    if display[1]:
+        axes.bar(x - 1. * width, dqn_data_means[1], width, yerr=dqn_data_stds[1],
+                 capsize=5, label="Gaussian DQN", color="tab:green")
+    if display[2]:
+        axes.bar(x, pfds_data_means[1], width, yerr=pfds_data_stds[1],
+                 capsize=5, label="DPBQN", color="tab:blue")
 
-    axes.bar(x + 0.5 * width, mc_data_means[1], width, yerr=mc_data_stds[1],
-             capsize=5, label="MC", color="tab:cyan")
-
-    axes.bar(x + 1.5 * width, mc_greedy_data_means[1], width, yerr=mc_greedy_data_stds[1],
-             capsize=5, label="Infotaxis", color="tab:purple")
+    if display[3]:
+        axes.bar(x + 1. * width, mc_data_means[1], width, yerr=mc_data_stds[1],
+                 capsize=5, label="DPBQN-PADS", color="tab:cyan")
+    if display[4]:
+        axes.bar(x + 1.5 * width, mc_greedy_data_means[1], width, yerr=mc_greedy_data_stds[1],
+                 capsize=5, label="Infotaxis", color="tab:purple")
     if len(speed_limits) > 1:
         axes.set_xlabel("Target Speed Limit")
     else:
         axes.set_xlabel("Initial Distances")
-    axes.set_ylabel("Runtime")
-    axes.set_title("Runtime across categories")
+    axes.set_ylabel("Runtime(s) per 100 steps")
+    axes.set_title("Evaluation runtime")
     axes.legend()
 
     plt.savefig(file_dir + "runtime.pdf")
 
 
+def calcaulte_tracking_rate(dists, d):
+    indices = np.where(dists < d)[0]
+    if len(indices) > 0:
+        first_idx = indices[0]
+        return len(indices) / len(dists[first_idx:])
+    else:
+        return 0.0
+
+
 def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, seed_cnt, file_dir,
-                                   speed_limits, distances):
+                                   speed_limits, distances, display):
     pfds_data = []
     adfq_data = []
     dqn_data = []
@@ -387,27 +413,27 @@ def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_
                 d1 = np.loadtxt(adfq_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
                                 delimiter=',')
                 d1_res.append(np.sum([1 if len(item[item < d]) > 0 else 0 for item in d1]) / 10.0)
-                d1_rate_res += [len(item[item < d]) / 100.0 for item in d1]
+                d1_rate_res += [calcaulte_tracking_rate(item, d) for item in d1]
 
                 d2 = np.loadtxt(dqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
                                 delimiter=',')
                 d2_res.append(np.sum([1 if len(item[item < d]) > 0 else 0 for item in d2]) / 10.0)
-                d2_rate_res += [len(item[item < d]) / 100.0 for item in d2]
+                d2_rate_res += [calcaulte_tracking_rate(item, d) for item in d2]
 
                 d3 = np.loadtxt(pfdqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
                                 delimiter=',')
                 d3_res.append(np.sum([1 if len(item[item < d]) > 0 else 0 for item in d3]) / 10.0)
-                d3_rate_res += [len(item[item < d]) / 100.0 for item in d3]
+                d3_rate_res += [calcaulte_tracking_rate(item, d) for item in d3]
 
                 d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
                                 delimiter=',')
                 d4_res.append(np.sum([1 if len(item[item < d]) > 0 else 0 for item in d4]) / 10.0)
-                d4_rate_res += [len(item[item < d]) / 100.0 for item in d4]
+                d4_rate_res += [calcaulte_tracking_rate(item, d) for item in d4]
 
                 d5 = np.loadtxt(mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
                                 delimiter=',')
                 d5_res.append(np.sum([1 if len(item[item < d]) > 0 else 0 for item in d5]) / 10.0)
-                d5_rate_res += [len(item[item < d]) / 100.0 for item in d5]
+                d5_rate_res += [calcaulte_tracking_rate(item, d) for item in d5]
 
                 # if METADATA["observation_model"]:
                 #     d1_particles = np.loadtxt(adfq_dirs[i] + 'particles_obs_' + str(sl) + '.csv', delimiter=',')
@@ -428,13 +454,19 @@ def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_
     mc_greedy_data = np.array(mc_greedy_data)
     fig, ax = plt.subplots(figsize=(8, 6))
     if len(speed_limits) > 1:
-        ax.errorbar(speed_limits, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
-                    label='ADFQ')  # Use fmt for line and markers
-        ax.errorbar(speed_limits, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='DQN')
-        # ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
-        ax.errorbar(speed_limits, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='MC')
-        ax.errorbar(speed_limits, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
-                    label='Infotaxis')
+        if display[0]:
+            ax.errorbar(speed_limits, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                        label='ADFQ')  # Use fmt for line and markers
+        if display[1]:
+            ax.errorbar(speed_limits, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+        if display[2]:
+            ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5,
+                        label='DPBQN')
+        if display[3]:
+            ax.errorbar(speed_limits, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+        if display[4]:
+            ax.errorbar(speed_limits, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
+                        label='Infotaxis')
 
         # Add labels, title, and legend
         ax.set_xlabel('Target Speed')
@@ -446,13 +478,19 @@ def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_
         plt.savefig(file_dir + "distance_discovery_rate_plot.pdf")
 
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.errorbar(speed_limits, adfq_data[:, 2], yerr=adfq_data[:, 3], fmt='-o', color='r', capsize=5,
-                    label='ADFQ')  # Use fmt for line and markers
-        ax.errorbar(speed_limits, dqn_data[:, 2], yerr=dqn_data[:, 3], fmt='-o', color='g', capsize=5, label='DQN')
-        # ax.errorbar(speed_limits, pfds_data[:, 2], yerr=pfds_data[:, 3], fmt='-o', color='b', capsize=5, label='DPBQN')
-        ax.errorbar(speed_limits, mc_data[:, 2], yerr=mc_data[:, 3], fmt='-o', color='c', capsize=5, label='MC')
-        ax.errorbar(speed_limits, mc_greedy_data[:, 2], yerr=mc_greedy_data[:, 3], fmt='-o', color='m', capsize=5,
-                    label='Infotaxis')
+        if display[0]:
+            ax.errorbar(speed_limits, adfq_data[:, 2], yerr=adfq_data[:, 3], fmt='-o', color='r', capsize=5,
+                        label='ADFQ')  # Use fmt for line and markers
+        if display[1]:
+            ax.errorbar(speed_limits, dqn_data[:, 2], yerr=dqn_data[:, 3], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+        if display[2]:
+            ax.errorbar(speed_limits, pfds_data[:, 2], yerr=pfds_data[:, 3], fmt='-o', color='b', capsize=5,
+                        label='DPBQN')
+        if display[3]:
+            ax.errorbar(speed_limits, mc_data[:, 2], yerr=mc_data[:, 3], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+        if display[4]:
+            ax.errorbar(speed_limits, mc_greedy_data[:, 2], yerr=mc_greedy_data[:, 3], fmt='-o', color='m', capsize=5,
+                        label='Infotaxis')
 
         # Add labels, title, and legend
         ax.set_xlabel('Target Speed')
@@ -463,13 +501,19 @@ def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_
         # Show the plot
         plt.savefig(file_dir + "distance_tracking_rate_plot.pdf")
     else:
-        ax.errorbar(distances, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
-                    label='ADFQ')  # Use fmt for line and markers
-        ax.errorbar(distances, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='DQN')
-        # ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
-        ax.errorbar(distances, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='MC')
-        ax.errorbar(distances, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
-                    label='Infotaxis')
+        if display[0]:
+            ax.errorbar(distances, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                        label='ADFQ')  # Use fmt for line and markers
+        if display[1]:
+            ax.errorbar(distances, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+        if display[2]:
+            ax.errorbar(distances, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5,
+                        label='DPBQN')
+        if display[3]:
+            ax.errorbar(distances, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+        if display[4]:
+            ax.errorbar(distances, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
+                        label='Infotaxis')
 
         # Add labels, title, and legend
         ax.set_xlabel('Initial Distances')
@@ -481,13 +525,19 @@ def plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_
         plt.savefig(file_dir + "distance_discovery_rate_plot.pdf")
 
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.errorbar(distances, adfq_data[:, 2], yerr=adfq_data[:, 3], fmt='-o', color='r', capsize=5,
-                    label='ADFQ')  # Use fmt for line and markers
-        ax.errorbar(distances, dqn_data[:, 2], yerr=dqn_data[:, 3], fmt='-o', color='g', capsize=5, label='DQN')
-        # ax.errorbar(speed_limits, pfds_data[:, 2], yerr=pfds_data[:, 3], fmt='-o', color='b', capsize=5, label='DPBQN')
-        ax.errorbar(distances, mc_data[:, 2], yerr=mc_data[:, 3], fmt='-o', color='c', capsize=5, label='MC')
-        ax.errorbar(distances, mc_greedy_data[:, 2], yerr=mc_greedy_data[:, 3], fmt='-o', color='m', capsize=5,
-                    label='Infotaxis')
+        if display[0]:
+            ax.errorbar(distances, adfq_data[:, 2], yerr=adfq_data[:, 3], fmt='-o', color='r', capsize=5,
+                        label='ADFQ')  # Use fmt for line and markers
+        if display[1]:
+            ax.errorbar(distances, dqn_data[:, 2], yerr=dqn_data[:, 3], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+        if display[2]:
+            ax.errorbar(distances, pfds_data[:, 2], yerr=pfds_data[:, 3], fmt='-o', color='b', capsize=5,
+                        label='DPBQN')
+        if display[3]:
+            ax.errorbar(distances, mc_data[:, 2], yerr=mc_data[:, 3], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+        if display[4]:
+            ax.errorbar(distances, mc_greedy_data[:, 2], yerr=mc_greedy_data[:, 3], fmt='-o', color='m', capsize=5,
+                        label='Infotaxis')
 
         # Add labels, title, and legend
         ax.set_xlabel('Initial Distances')
@@ -581,37 +631,120 @@ def plot_nonmarkovian(markov_dirs, non_markov_dirs, seed_cnt, file_dir):
     plt.savefig(file_dir + "LogDetCov.pdf")
 
 
+def plot_particles(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, seed_cnt, file_dir, speed_limits,
+                   distances, display):
+    pfds_data = []
+    adfq_data = []
+    dqn_data = []
+    mc_data = []
+    mc_greedy_data = []
+    for sl in speed_limits:
+        for dist in distances:
+            d1_res = []
+            d2_res = []
+            d3_res = []
+            d4_res = []
+            d5_res = []
+
+            for i in range(seed_cnt):
+                d1 = np.loadtxt(adfq_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
+                                delimiter=',')
+                d1_res.append(np.mean(np.sum(d1, axis=1)))
+
+                d2 = np.loadtxt(dqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
+                                delimiter=',')
+                d2_res.append(np.mean(np.sum(d2, axis=1)))
+
+                d3 = np.loadtxt(pfdqn_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
+                                delimiter=',')
+                d3_res.append(np.mean(np.sum(d3, axis=1)))
+
+                d4 = np.loadtxt(mc_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
+                                delimiter=',')
+                d4_res.append(np.mean(np.sum(d4, axis=1)))
+
+                d5 = np.loadtxt(mc_greedy_dirs[i] + str(sl) + "/" + str(dist) + "/" + 'distance_' + str(sl) + '.csv',
+                                delimiter=',')
+                d5_res.append(np.mean(np.sum(d5, axis=1)))
+
+                # if METADATA["observation_model"]:
+                #     d1_particles = np.loadtxt(adfq_dirs[i] + 'particles_obs_' + str(sl) + '.csv', delimiter=',')
+                #
+                #     d2_particles = np.loadtxt(dqn_dirs[i] + 'particles_obs_' + str(sl) + '.csv', delimiter=',')
+                #
+                #     d3_particles = np.loadtxt(pfdqn_dirs[i] + 'particles_obs_' + str(sl) + '.csv', delimiter=',')
+
+            adfq_data.append([np.mean(d1_res), np.std(d1_res)])
+            dqn_data.append([np.mean(d2_res), np.std(d2_res)])
+            pfds_data.append([np.mean(d3_res), np.std(d3_res)])
+            mc_data.append([np.mean(d4_res), np.std(d4_res)])
+            mc_greedy_data.append([np.mean(d5_res), np.std(d5_res)])
+    pfds_data = np.array(pfds_data)
+    dqn_data = np.array(dqn_data)
+    adfq_data = np.array(adfq_data)
+    mc_data = np.array(mc_data)
+    mc_greedy_data = np.array(mc_greedy_data)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    if display[0]:
+        ax.errorbar(distances, adfq_data[:, 0], yerr=adfq_data[:, 1], fmt='-o', color='r', capsize=5,
+                    label='ADFQ')  # Use fmt for line and markers
+    if display[1]:
+        ax.errorbar(distances, dqn_data[:, 0], yerr=dqn_data[:, 1], fmt='-o', color='g', capsize=5, label='Gaussian DQN')
+    if display[2]:
+        ax.errorbar(speed_limits, pfds_data[:, 0], yerr=pfds_data[:, 1], fmt='-o', color='b', capsize=5, label='DPBQN')
+    if display[3]:
+        ax.errorbar(distances, mc_data[:, 0], yerr=mc_data[:, 1], fmt='-o', color='c', capsize=5, label='DPBQN-PADS')
+    if display[4]:
+        ax.errorbar(distances, mc_greedy_data[:, 0], yerr=mc_greedy_data[:, 1], fmt='-o', color='m', capsize=5,
+                    label='Infotaxis')
+
+        # Add labels, title, and legend
+    ax.set_xlabel('Initial Distances')
+    ax.set_ylabel('Number of Particles')
+    ax.set_title('Particles Collected')
+    ax.legend()  # Show the legend
+
+    # Show the plot
+    plt.savefig(file_dir + "particle_collection.pdf")
+
+
 if __name__ == '__main__':
-    task = "obstacle"
+    task = "gas_obstacle"
     random_init = True
-    speed_limits = [0.1]
-    distances = [10.0]
-    # speed_limits = [0.1, 1.0, 2.0, 3.0]
+    # speed_limits = [0.1,1.0,2.0,3.0]
     # distances = [40.0]
+    speed_limits = [0.1]
+    distances = [10.0, 20.0, 30.0, 40.0]
     file_dir = "dqn/experiments/final_results/" + task + "/"
     seeds = [0, 1, 2, 3, 4]
+    display = [False, True, True, True, False]
     if task != "non-markovian":
-        adfq_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_11042029/seed_0/test/seed_" + str(seed) + "/" + (
+        adfq_dirs = [os.path.join(file_dir, "DPBQN/seed_0/test/seed_" + str(seed) + "/" + (
             "random_init/" if random_init else "")) for seed in seeds]
-        dqn_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_11042029/seed_0/test/seed_" + str(seed) + "/" + (
+        dqn_dirs = [os.path.join(file_dir, "Gaussian_DQN/seed_0/test/seed_" + str(seed) + "/" + (
             "random_init/" if random_init else "")) for seed in seeds]
-        pfdqn_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_11041602/seed_0/test/seed_" + str(seed) + "/" + (
+        pfdqn_dirs = [os.path.join(file_dir, "DPBQN/seed_0/test/seed_" + str(seed) + "/" + (
             "random_init/" if random_init else "")) for seed in seeds]
-        mc_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_11042029/seed_0/test/seed_" + str(seed) + "/" + (
+        pfdqn_pads_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_0506085744/seed_0/test/seed_" + str(seed) + "/" + (
             "random_init/" if random_init else "")) for seed in seeds]
-        mc_greedy_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_11042029/seed_0/test/seed_" + str(seed) + "/" + (
-            "random_init/" if random_init else "")) for seed in seeds]
-        plot_tracking_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, len(seeds), file_dir, speed_limits,
-                           distances)
+        mc_greedy_dirs = [
+            os.path.join(file_dir, "TargetTracking-v1_1_0506085744/seed_0/test/seed_" + str(seed) + "/" + (
+                "random_init/" if random_init else "")) for seed in seeds]
+        plot_tracking_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, pfdqn_pads_dirs, mc_greedy_dirs, len(seeds), file_dir, speed_limits,
+                           distances, display)
         # plot_distance(adfq_dirs,dqn_dirs,pfdqn_dirs,len(seeds))
-        plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, len(seeds), file_dir,
-                            speed_limits, distances)
-        # plot_test_results(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, len(seeds), file_dir, speed_limits,
-        #                   distances)
-        # plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, len(seeds), file_dir,
-        #                                speed_limits, distances)
+        plot_discovery_rate(adfq_dirs, dqn_dirs, pfdqn_dirs, pfdqn_pads_dirs, mc_greedy_dirs, len(seeds), file_dir,
+                            speed_limits, distances, display)
+        plot_test_results(adfq_dirs, dqn_dirs, pfdqn_dirs, pfdqn_pads_dirs, mc_greedy_dirs, len(seeds), file_dir, speed_limits,
+                          distances, display)
+        plot_distance_tracking_figures(adfq_dirs, dqn_dirs, pfdqn_dirs, pfdqn_pads_dirs, mc_greedy_dirs, len(seeds), file_dir,
+                                       speed_limits, distances, display)
         # plot_distancefigures(adfq_dirs, dqn_dirs, pfdqn_dirs, mc_dirs, mc_greedy_dirs, len(seeds), file_dir,
         #                      speed_limits, distances)
+        # if task in ["gas_obstacle", "gas_empty"]:
+        #     plot_particles(adfq_dirs, dqn_dirs, pfdqn_dirs, pfdqn_pads_dirs, mc_greedy_dirs, len(seeds), file_dir,
+        #                    speed_limits, distances, display)
+
     else:
         markov_dirs = [os.path.join(file_dir, "TargetTracking-v1_1_07180912/seed_0/test/seed_" + str(seed) + "/" + (
             "random_init/" if random_init else "")) for seed in seeds]

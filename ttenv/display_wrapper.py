@@ -7,13 +7,13 @@ import matplotlib
 
 from ttenv.belief_tracker import PFbelief
 
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import animation
 
 from ttenv.metadata import METADATA, LEAKAGE_OBS
-
+# from shapely import plotting
 
 class Display2D(Wrapper):
     def __init__(self, env, figID=0, skip=1, confidence=0.95, local_view=0):
@@ -151,6 +151,10 @@ class Display2D(Wrapper):
                                          angle=state[2] / np.pi * 180, theta1=-METADATA['fov'] / 2,
                                          theta2=METADATA['fov'] / 2, facecolor='gray')
                 ax.add_patch(sensor_arc)
+                observable_shape = self.env_core.MAP.get_fov_shape(self.env_core.agent.fov_polygon)
+                # pathPatch = plotting.plot_polygon(observable_shape, ax=ax)
+                # ax.add_patch(pathPatch[0])
+                # ax.add_line(pathPatch[1])
                 ax.plot(
                     [state[0], state[0] + METADATA['sensor_r'] * np.cos(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
                     [state[1], state[1] + METADATA['sensor_r'] * np.sin(state[2] + 0.5 * METADATA['fov'] / 180.0 * np.pi)],
@@ -164,8 +168,18 @@ class Display2D(Wrapper):
                     'v_target:%.2f' % np.sqrt(np.sum(self.env_core.targets[0].state[2:] ** 2)))
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 10., 'v_agent:%.2f' % self.env_core.agent.vw[0])
             ax.text(self.mapmax[0] + 1., self.mapmax[1] - 15., 'w_agent:%.2f' % self.env_core.agent.vw[1])
+            ax.text(self.mapmax[0] + 1., self.mapmax[1] - 20., 'num_collision:%.2f' % self.env_core.num_collisions)
+            if isinstance(self.env_core.belief_targets[0], PFbelief):
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 25., 'ob linear:%.2f' % self.env_core.state['agent'].cpu().numpy().squeeze()[-2])
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 30., 'ob angular:%.2f' % self.env_core.state['agent'].cpu().numpy().squeeze()[-1])
+            else:
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 25.,
+                        'ob linear:%.2f' % self.env_core.state[0])
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 30.,
+                        'ob angular:%.2f' % self.env_core.state[1])
+
             if self.env_core.observation_model == LEAKAGE_OBS:
-                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 20., 'obs:%.2f' % np.sum([self.env_core.observation(target)[1] for target in self.targets]))
+                ax.text(self.mapmax[0] + 1., self.mapmax[1] - 25., 'obs:%.2f' % np.sum([self.env_core.observation(target)[1] for target in self.targets]))
             ax.set_xlim((self.mapmin[0], self.mapmax[0]))
             ax.set_ylim((self.mapmin[1], self.mapmax[1]))
             ax.set_title("Trajectory %d" % self.traj_num)
@@ -193,6 +207,25 @@ class Display2D(Wrapper):
                     plt.savefig(kwargs["log_dir"] + "test" + str(self.n_frames) + ".png")
                 else:
                     plt.savefig("test" + str(self.n_frames) + ".png")
+
+            # self.fig.clf()
+            # ax = self.fig.subplots()
+            # for i in range(num_targets):
+            #     if isinstance(self.env_core.belief_targets[i], PFbelief):
+            #         particles = self.env_core.state['target'].cpu().numpy()[i]
+            #         ax.scatter(particles[:, 1], particles[:, 0],
+            #                    c=1 - np.array(self.env_core.belief_targets[i].weights), cmap='gray',
+            #                    label="RL Target Belief")
+            #         obstacle_info = self.env_core.state['agent'].cpu().numpy().squeeze()
+            #         ax.plot(obstacle_info[0], obstacle_info[1], marker='s',
+            #             markersize=5, linestyle='None', markerfacecolor='r',
+            #             markeredgecolor='r',label="Obstacle")
+            #         ax.set_xlabel("Linear Distance")
+            #         ax.set_ylabel("Angular Distance")
+            # if "log_dir" in kwargs:
+            #     plt.savefig(kwargs["log_dir"] + "test_RL_states_" + str(self.n_frames) + ".png")
+            # else:
+            #     plt.savefig("test_RL_states_" + str(self.n_frames) + ".png")
 
         self.n_frames += 1
 

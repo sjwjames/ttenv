@@ -269,32 +269,47 @@ class TargetTrackingBase(gym.Env):
         self.targets = targets
 
     def observation(self, target):
-        r, alpha = util.relative_distance_polar(target.state[:2],
-                                                xy_base=self.agent.state[:2],
-                                                theta_base=self.agent.state[2])
-        observed = (r <= self.sensor_r) \
-                   & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
-                   & (not (self.MAP.is_blocked(self.agent.state, target.state)))
-        z = None
+        if isinstance(target,Agent):
+            r, alpha = util.relative_distance_polar(target.state[:2],
+                                                    xy_base=self.agent.state[:2],
+                                                    theta_base=self.agent.state[2])
+            observed = (r <= self.sensor_r) \
+                       & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
+                       & (not (self.MAP.is_blocked(self.agent.state, target.state)))
+        else:
+            r, alpha = util.relative_distance_polar(target[:2],
+                                                    xy_base=self.agent.state[:2],
+                                                    theta_base=self.agent.state[2])
+            observed = (r <= self.sensor_r) \
+                       & (abs(alpha) <= self.fov / 2 / 180 * np.pi) \
+                       & (not (self.MAP.is_blocked(self.agent.state, target)))
         if self.observation_model == GAUSSIAN_OBS:
-            if observed:
-                z = np.array([r, alpha])
-                z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
-        elif self.observation_model == LEAKAGE_OBS:
-            z = self.leakage_model.generate_sample(self.agent.state, target.state)
-            if z > 0.0:
+            if METADATA["varying_ob_noise"]:
                 observed = True
-            else:
-                observed = False
+            # if observed:
+            #     z = np.array([r, alpha])
+            #     z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
+            z = np.array([r, alpha])
+            z += np.random.multivariate_normal(np.zeros(2, ), self.observation_noise(z))
+
+        elif self.observation_model == LEAKAGE_OBS:
+
+            z = self.leakage_model.generate_sample(self.agent.state, target.state if isinstance(target,Agent) else target)
+            # if z > 0.0:
+            #     observed = True
+            # else:
+            #     observed = False
+            observed = True
         else:
             raise Exception("Unsupported measurement model")
+
         return observed, z
 
     def observation_noise(self, z):
         # todo can change this to a varying noise
         if METADATA["varying_ob_noise"]:
-            obs_noise_cov = np.array([[abs(.1 * z[0] + 0.05), 0.0],
-                                      [0.0, abs(.1 * z[1] + 0.05)]])
+            obs_noise_cov = np.array([[abs(.5 * z[0] )+ 0.05, 0.0],
+                                      [0.0, abs(.5 * z[1])+ 0.05]])
         else:
             obs_noise_cov = np.array([[self.sensor_r_sd * self.sensor_r_sd, 0.0],
                                       [0.0, self.sensor_b_sd * self.sensor_b_sd]])

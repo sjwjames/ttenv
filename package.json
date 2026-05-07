@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@zilliz/feder": "^1.0.7"
+  }
+}

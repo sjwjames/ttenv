@@ -1,0 +1,1 @@
+python ttenv/dqn/ADFQ/deep_adfq/run_tracking.py --device /cpu:0 --mode train --env TargetTracking-v1 --map obstacles --nb_train_steps 500000 --nb_epoch_steps 100 --target_update_freq 1 --checkpoint_freq 1000 --nb_warmup_steps 50000 --act_policy bayesian --blocked 1 --gamma 0.95

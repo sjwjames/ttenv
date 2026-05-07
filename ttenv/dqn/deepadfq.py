@@ -294,7 +294,11 @@ class BayesianDQNAgent(DQNAgent):
                 # Sample from normal distribution
                 samples = torch.randn_like(q_means) * q_sds + q_means
                 action = torch.argmax(samples, dim=1)
-                return action.numpy()[0]
+                if "ret_q_vals" in kwargs and kwargs["ret_q_vals"]:
+                    return action.numpy()[0], q_means.detach().cpu().numpy().squeeze()
+                else:
+                    return action.numpy()[0]
+
 
     # def compute_td_error(self, obs_t, action, reward, obs_tp1, done, gamma):
     #     """Compute TD-error for a single transition.

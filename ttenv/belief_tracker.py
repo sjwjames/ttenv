@@ -99,7 +99,7 @@ class UKFbelief(object):
     """
 
     def __init__(self, dim, limit, dim_z=2, fx=None, W=None, obs_noise_func=None,
-                 collision_func=None, sampling_period=0.5, kappa=1, hx=None,measurement_model=GAUSSIAN_OBS):
+                 collision_func=None, sampling_period=0.5, kappa=1, hx=None, measurement_model=GAUSSIAN_OBS):
         """
         dim : dimension of state
             ***Assuming dim==3: (x,y,theta), dim==4: (x,y,xdot,ydot), dim==5: (x,y,theta,v,w)
@@ -184,15 +184,23 @@ class UKFbelief(object):
             r_z[1] = util.wrap_around(r_z[1])
             return r_z
 
-        sigmas = JulierSigmaPoints(n=dim, kappa=kappa)
-        if measurement_model==GAUSSIAN_OBS:
+        def sqrt_func(x):
+            try:
+                result = np.linalg.cholesky(x)
+            except np.linalg.LinAlgError:
+                x = (x + x.T) / 2
+                result = np.linalg.cholesky(x)
+            return result
+
+        sigmas = JulierSigmaPoints(n=dim, kappa=kappa, sqrt_method=sqrt_func)
+        if measurement_model == GAUSSIAN_OBS:
             self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
                                              hx=hx, points=sigmas, x_mean_fn=x_mean_fn_,
                                              z_mean_fn=z_mean_fn_, residual_x=residual_x_,
                                              residual_z=residual_z_)
-        elif measurement_model==LEAKAGE_OBS:
+        elif measurement_model == LEAKAGE_OBS:
             self.ukf = UnscentedKalmanFilter(dim, dim_z, sampling_period, fx=fx,
-                                             hx=hx, points=sigmas)
+                                             hx=hx, points=sigmas, sqrt_fn=sqrt_func)
 
     def reset(self, init_state, init_cov):
         self.state = init_state
@@ -234,7 +242,8 @@ class UKFbelief(object):
 
 class PFbelief(object):
     def __init__(self, dim, limit, transition_func, n, effective_n, dim_z=2,
-                 obs_noise_func=None, collision_func=None, obs_check_func=None, sampling_period=0.5):
+                 obs_noise_func=None, collision_func=None, obs_check_func=None, observation_func=None,
+                 sampling_period=0.5):
         self.dim = dim
         self.dim_z = dim_z
         self.limit = limit
@@ -246,6 +255,7 @@ class PFbelief(object):
         self.obs_noise_func = obs_noise_func
         self.obs_check_func = obs_check_func
         self.sampling_period = sampling_period
+        self.observation_func = observation_func
         if METADATA["observation_model"] == LEAKAGE_OBS:
             self.leakage_model = GasLeakageModel()
 
@@ -259,11 +269,29 @@ class PFbelief(object):
         self.state, self.cov = self.calculate_bs_moments()
 
     def predict(self):
+        # pred_state_mean = self.transition_func.sample(self.state,1)
+        # self.states = np.random.multivariate_normal(pred_state_mean, self.cov,size=self.n)
+        # self.states = np.array([self.transition_func(p) for p in self.states])
         self.states = self.transition_func.sample(self.states, self.n)
         # self.states = np.array([np.matmul(self.transition_func.coefficient,state) for state in self.states])
         # if self.collision_func(np.dot(self.weights, self.states)):
         #     self.states = [self.collision_deviation(p) for p in self.states]
         # self.states = np.concatenate((np.clip(self.states[:,:2], self.limit[0][:2], self.limit[1][:2]),self.states[:,2:]),axis=1)
+        self.states = np.clip(self.states, self.limit[0], self.limit[1])
+        self.state, self.cov = self.calculate_bs_moments()
+
+    def filter(self):
+        # filter out particles that are in the FOV while the agent does not observe the target
+        if self.observation_func:
+            for i, particle in enumerate(self.states):
+                observed, _ = self.observation_func(particle)
+                if observed:
+                    self.weights[i] = 0.0 + 1e-300
+
+        self.weights = self.weights / np.sum(self.weights)
+        random_samples = np.random.choice(self.states.shape[0], size=self.n, replace=True, p=self.weights)
+        self.weights = np.ones(self.n) * (1 / self.n)
+        self.states = self.states[random_samples]
         self.states = np.clip(self.states, self.limit[0], self.limit[1])
         self.state, self.cov = self.calculate_bs_moments()
 
@@ -327,7 +355,7 @@ class PFbelief(object):
         # mean_val = np.dot(self.weights, self.states)
         state_dim = len(self.states[0])
         gmm_approx = GMMDist(self.weights, self.states, [np.eye(state_dim) * 0.01 for _ in self.weights])
-        mean_val,var_val = gmm_approx.compute_mms()
+        mean_val, var_val = gmm_approx.compute_mms()
         # if len(mean_val) > 1:
         #     mean_val = np.average(self.states, axis=0, weights=self.weights)
         #     var_val = np.cov(self.states, rowvar=False, aweights=self.weights)
@@ -466,8 +494,8 @@ class AuxiliaryPFbelief(PFbelief):
         #     random_samples = np.random.choice(next_state_samples.shape[0], size=self.n, replace=True, p=weights_new)
         #     next_state_samples = next_state_samples[random_samples]
         #     weights_new = np.ones(self.n) * (1 / self.n)
-            # post_dist = GMMDist(weights_new, pred_state_marg.means, pred_state_marg.covs)
-            # sampled_data = post_dist.sample(N)
+        # post_dist = GMMDist(weights_new, pred_state_marg.means, pred_state_marg.covs)
+        # sampled_data = post_dist.sample(N)
 
         self.last_states = np.array(self.states)
         self.last_weights = np.array(self.weights)

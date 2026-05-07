@@ -288,17 +288,77 @@ class CNNPlusMLP(nn.Module):
         return action_scores
 
 
+class PermEqui1_max(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(PermEqui1_max, self).__init__()
+        self.Gamma = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        xm, _ = x.max(1, keepdim=True)
+        x = self.Gamma(x - xm)
+        return x
+
+
+class PermEqui1_mean(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(PermEqui1_mean, self).__init__()
+        self.Gamma = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        xm = x.mean(1, keepdim=True)
+        x = self.Gamma(x - xm)
+        return x
+
+
+class PermEqui2_max(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(PermEqui2_max, self).__init__()
+        self.Gamma = nn.Linear(in_dim, out_dim)
+        self.Lambda = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x):
+        xm, _ = x.max(1, keepdim=True)
+        xm = self.Lambda(xm)
+        x = self.Gamma(x)
+        x = x - xm
+        return x
+
+
+class PermEqui2_mean(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(PermEqui2_mean, self).__init__()
+        self.Gamma = nn.Linear(in_dim, out_dim)
+        self.Lambda = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x):
+        xm = x.mean(1, keepdim=True)
+
+        xm = self.Lambda(xm)
+        x = self.Gamma(x)
+        x = x - xm
+        return x
+
+
 class ParticleDeepSetMLP(nn.Module):
-    def __init__(self, target_dim, agent_dim, output_dim, layer_norm=True):
+
+    def __init__(self, target_dim, agent_dim, output_dim, layer_norm=True, non_lin="elu", set_size=100,
+                 mode="perm_equiv"):
         super(ParticleDeepSetMLP, self).__init__()
         self.target_dim = target_dim
         self.agent_dim = agent_dim
         self.output_dim = output_dim
-        hidden_dim = 16
+        if mode == "perm_equiv":
+            hidden_dim = target_dim * 2
+        else:
+            hidden_dim = set_size + 1
 
         # concat the agent state
-        reg_dim = hidden_dim+agent_dim
-        #stack the agent state
+        reg_dim = hidden_dim + agent_dim
+        self.ds_mode = mode
+        # TODO: specialized for one particle, remove later
+        # reg_dim = target_dim-1+agent_dim
+
+        # stack the agent state
         # reg_dim = hidden_dim
         if layer_norm:
             # agent embedding
@@ -309,16 +369,42 @@ class ParticleDeepSetMLP(nn.Module):
             #                               nn.Linear(hidden_dim, hidden_dim * 2), nn.LayerNorm(hidden_dim * 2),
             #                               nn.ReLU(),
             #                               nn.Linear(hidden_dim * 2, hidden_dim), nn.LayerNorm(hidden_dim))
-            self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.ReLU(),
-                                                 nn.Linear(hidden_dim, target_dim))
+            self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim * 2), nn.LayerNorm(hidden_dim * 2),
+                                                 nn.ReLU(),
+                                                 nn.Linear(hidden_dim * 2, hidden_dim))
 
-            self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim), nn.ReLU(),
-                                          nn.Linear(hidden_dim, hidden_dim * 2), nn.ReLU(),
-                                          nn.Linear(hidden_dim * 2, hidden_dim))
-            self.regressor = nn.Sequential(nn.Linear(reg_dim, hidden_dim * 2), nn.LayerNorm(hidden_dim * 2), nn.ReLU(),
-                                           nn.Linear(hidden_dim * 2, hidden_dim),
-                                           nn.LayerNorm(hidden_dim), nn.ReLU(),
-                                           nn.Linear(hidden_dim, output_dim))
+            # self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim),
+            #                               nn.Linear(hidden_dim, hidden_dim),
+            #                               nn.ReLU())
+            if mode == "perm_equiv":
+                self.phi_func = nn.Sequential(PermEqui2_mean(target_dim, hidden_dim),
+                                              nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                              PermEqui2_mean(hidden_dim, hidden_dim),
+                                              nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                              PermEqui2_mean(hidden_dim, hidden_dim),
+                                              nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh())
+                self.regressor = nn.Sequential(nn.Linear(reg_dim, 64), nn.LayerNorm(64), nn.ReLU(),
+                                               nn.Linear(64, 128),
+                                               nn.LayerNorm(128), nn.ReLU(),
+                                               nn.Linear(128, 64),
+                                               nn.LayerNorm(64), nn.ReLU(),
+                                               nn.Linear(64, output_dim))
+            else:
+                self.phi_func = nn.Sequential(nn.Linear(target_dim, hidden_dim),
+                                              nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                              nn.Linear(hidden_dim, hidden_dim),
+                                              nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                              nn.Linear(hidden_dim, hidden_dim))
+                self.regressor = nn.Sequential(nn.Linear(reg_dim, reg_dim), nn.LayerNorm(reg_dim),
+                                               nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                               nn.Linear(reg_dim, reg_dim),
+                                               nn.LayerNorm(reg_dim),
+                                               nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                               nn.Linear(reg_dim, reg_dim),
+                                               nn.LayerNorm(reg_dim),
+                                               nn.ELU(inplace=True) if non_lin == "elu" else nn.Tanh(),
+                                               nn.Linear(reg_dim, output_dim))
+
         else:
             # agent embedding
             self.agent_embedding = nn.Sequential(nn.Linear(agent_dim, hidden_dim), nn.ReLU(),
@@ -332,30 +418,31 @@ class ParticleDeepSetMLP(nn.Module):
                                            nn.Linear(hidden_dim, output_dim))
 
     def forward(self, target_belief, agent):
-        agent_batch_size, agent_set_size, agent_input_dim = agent.shape
-        agent_reshaped = agent.view(-1, agent_input_dim)
-
         batch_size, set_size, input_dim = target_belief.shape
-        target_belief_reshaped = target_belief.view(-1, input_dim)
-
         # agent_rep = self.agent_embedding(agent_reshaped)
         # agent_rep = self.phi_func(agent_rep)
         # agent_rep = agent_rep.view(agent_batch_size, agent_set_size, -1)
+        target_weights = target_belief[:, :, 0:1]
+        if set_size != 1:
+            if self.ds_mode == "perm_equiv":
+                target_rep = self.phi_func(target_belief[:, :, 1:])
+                agent_expanded = agent.expand(-1, set_size, -1)
+                q_input = torch.cat((target_rep, agent_expanded), dim=-1)
+                res = self.regressor(q_input)
+                res = (res * target_weights).sum(dim=1, keepdim=True)
+            else:
+                target_rep = self.phi_func(target_belief)
+                target_m, _ = target_rep.max(dim=1, keepdim=True)
+                q_input = torch.cat((target_m, agent), dim=-1)
+                res = self.regressor(q_input)
 
+            return res.view(-1, res.shape[-1])
+        else:
+            target_rep = target_belief[:, :, 1:]
+            q_input = torch.cat((target_rep, agent), dim=-1)
 
-        target_rep = self.phi_func(target_belief_reshaped)
-        target_rep = target_rep.view(batch_size, set_size, -1)
-        sum_pooled = torch.cat((target_rep.sum(dim=1), agent_reshaped), dim=1)
-        # sum_pooled = torch.cat((target_rep, agent_rep), dim=1).sum(dim=1)
-        return self.regressor(sum_pooled)
-
-    # def forward(self, target_belief, agent):
-    #     batch_size, set_size, input_dim = target_belief.shape
-    #     target_belief_reshaped = target_belief.view(-1, input_dim)
-    #     target_rep = self.phi_func(target_belief_reshaped)
-    #     target_rep = target_rep.view(batch_size, set_size, -1)
-    #     sum_pooled = target_rep.sum(dim=1)
-    #     return self.regressor(sum_pooled)
+            res = self.regressor(q_input)
+            return res.view(-1, res.shape[-1])
 
 
 def get_mlp_model(input_dim, hiddens=[], layer_norm=False):
@@ -411,7 +498,7 @@ def get_cnn_model(observation_shape, convs, hiddens, dueling=False, layer_norm=F
     return model_fn
 
 
-def get_deepsetmlp_model(target_dim, agent_dim):
+def get_deepsetmlp_model(target_dim, agent_dim, set_size=100, mode="perm_equiv"):
     """Factory function to create MLP model.
 
     Parameters
@@ -428,6 +515,6 @@ def get_deepsetmlp_model(target_dim, agent_dim):
     """
 
     def model_fn(num_actions):
-        return ParticleDeepSetMLP(target_dim, agent_dim, num_actions)
+        return ParticleDeepSetMLP(target_dim, agent_dim, num_actions, set_size=set_size, mode=mode)
 
     return model_fn

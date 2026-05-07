@@ -13,10 +13,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from collections import deque
 
-from replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, ParticleBeliefReplayBuffer
+from ttenv.dqn.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, ParticleBeliefReplayBuffer
 from ttenv.agent_models import SE2Dynamics
 from ttenv.metadata import METADATA
-from utils import save_state, load_state
 import matplotlib.pyplot as plt
 
 GAMMA = .9
@@ -71,7 +70,10 @@ class DQNAgent:
         observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q_values = self.model(observation)
-        return q_values.argmax(dim=1).item()
+        if "ret_q_vals" in kwargs and kwargs["ret_q_vals"]:
+            return q_values.argmax(dim=1).item(),q_values.detach().cpu().numpy().squeeze()
+        else:
+            return q_values.argmax(dim=1).item()
 
     def compute_td_error(self, obs_t, action, reward, obs_tp1, done, gamma):
         """Compute TD-error for a single transition.
@@ -420,9 +422,10 @@ def learn(env,
           test_eps=0.05,
           gpu_memory=1.0,
           render=False,
-          device="cuda" if torch.cuda.is_available() else
-          "mps" if torch.backends.mps.is_available() else
-          "cpu",
+          # device="cuda" if torch.cuda.is_available() else
+          # "mps" if torch.backends.mps.is_available() else
+          # "cpu",
+          device="cpu",
           particle_belief=False,
           reuse_last_init=False,
           blocked=False):
@@ -659,6 +662,7 @@ def learn(env,
     eval_returns = [[], [], []]
     eval_check = checkpoint_freq // epoch_steps
     eval_episodes = 1
+    increasing_flag = False
     episode_discovery_rate_dist = []
     lin_dist_range_a2b = METADATA["lin_dist_range_a2b"]
     lin_dist_range_b2t = METADATA["lin_dist_range_b2t"]
@@ -707,6 +711,7 @@ def learn(env,
 
                 eval_returns[0].append(num_episodes)
                 eval_episode_rewards = []
+                eval_episode_dr = []
                 for e_e in range(eval_episodes):
                     eval_episode_reward = 0
                     obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,
@@ -721,27 +726,29 @@ def learn(env,
                         obs = next_obs
                         if e_e == eval_episodes - 1:
                             env.render(log_dir=rollout_dir)
-
+                    eval_episode_dr.append(np.mean([dr / epoch_steps for dr in env.discover_cnt]))
                     eval_episode_rewards.append(eval_episode_reward)
                 eval_returns[1].append(np.mean(eval_episode_rewards))
                 eval_returns[2].append(np.std(eval_episode_rewards))
-            # temp code, for training
-            # if num_episodes % 100 == 0 and np.mean(episode_discovery_rate_dist[-100:]) > .8:
-            #     if reuse_last_init:
-            #         env.init_pose["targets"][0][0] = np.clip(env.init_pose["targets"][0][0] + 1, env.MAP.mapmin[0],
-            #                                                  env.MAP.mapmax[0] - 1.0)
-            #         env.init_pose["targets"][0][1] = np.clip(env.init_pose["targets"][0][1] + 1, env.MAP.mapmin[1],
-            #                                                  env.MAP.mapmax[1] - 1.0)
-            #     add_times += 1
-            #     lin_dist_range_a2b = (lin_dist_range_a2b[0], min(20.0, lin_dist_range_a2b[1] + add_times * 1.0))
-            #     lin_dist_range_b2t = (lin_dist_range_b2t[0], min(20.0, lin_dist_range_b2t[1] + add_times * 1.0))
-            #     ang_dist_range_a2b = (
-            #         max(-np.pi, ang_dist_range_a2b[0] - add_times * .1),
-            #         min(np.pi, ang_dist_range_a2b[1] + add_times * .1))
-            #     speed = min(env.target_speed_limit + 1.0, 3.0)
-            #     env.set_limits(target_speed_limit=speed)
-            #     env.init_pose["targets"][0][2] = speed
-            #     env.targets[0].limit = env.limit['target']
+                # temp code, for training
+                if increasing_flag and np.mean(eval_episode_dr) > .9:
+                    if reuse_last_init:
+                        env.init_pose["targets"][0][0] = np.clip(env.init_pose["targets"][0][0] + 1, env.MAP.mapmin[0],
+                                                                 env.MAP.mapmax[0] - 1.0)
+                        env.init_pose["targets"][0][1] = np.clip(env.init_pose["targets"][0][1] + 1, env.MAP.mapmin[1],
+                                                                 env.MAP.mapmax[1] - 1.0)
+                    add_times += 1
+                    lin_dist_range_a2b = (min(40.0, lin_dist_range_a2b[0] + add_times * 1.0),
+                                          min(41.0, lin_dist_range_a2b[1] + add_times * 1.0))
+                    # lin_dist_range_b2t = (lin_dist_range_b2t[0], min(40.0, lin_dist_range_b2t[1] + add_times * 1.0))
+                    # ang_dist_range_a2b = (
+                    #     max(-np.pi, ang_dist_range_a2b[0] - add_times * .1),
+                    #     min(np.pi, ang_dist_range_a2b[1] + add_times * .1))
+                    # speed = min(env.target_speed_limit + 1.0, 3.0)
+                    # env.set_limits(target_speed_limit=speed)
+                    # env.init_pose["targets"][0][2] = speed
+                    env.targets[0].limit = env.limit['target']
+
             num_episodes += 1
             # Reset environment
             obs = env.reset(reuse_last_init=reuse_last_init, lin_dist_range_a2b=lin_dist_range_a2b,

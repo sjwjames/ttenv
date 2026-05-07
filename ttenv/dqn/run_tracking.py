@@ -64,7 +64,8 @@ parser.add_argument('--scope', type=str, default='deepadfq')
 parser.add_argument('--varth', type=float, default=1e-10)
 parser.add_argument('--noise', type=float, default=1.0)
 parser.add_argument('--blocked', type=int, default=0)
-
+parser.add_argument('--ds_mode', type=str, choices=['perm_equiv', 'perm_inv'], default='perm_equiv')
+parser.add_argument('--exp', type=str, choices=['gas', 'gaussian'], default='gaussian')
 args = parser.parse_args()
 
 
@@ -86,7 +87,8 @@ def train(seed, save_dir):
                      is_training=True,
                      im_size=args.im_size,
                      T_steps=args.nb_epoch_steps,
-                     n_particles=args.num_particles
+                     n_particles=args.num_particles,
+                     ds_mode = args.ds_mode
                      )
 
     if not args.particle_belief:
@@ -108,8 +110,10 @@ def train(seed, save_dir):
     else:
         # 1 for particle weight, 2 for obstacle info, observed info per target
         # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets,
-        #                                 env.env.agent.dim + 2 + args.nb_targets)
-        model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets, 2)
+        #                                 env.env.agent.dim + 2)
+        # model_fn = get_deepsetmlp_model((1 + env.env.target_dim) * args.nb_targets, METADATA['fov_poly_observable_seg']*2+2*args.nb_targets)
+        model_fn = get_deepsetmlp_model(((1 if args.ds_mode == "perm_inv" else 0) + 4) * args.nb_targets,
+                                        2 + 2 * args.nb_targets, set_size=args.num_particles, mode=args.ds_mode)
 
     if args.act_policy == "egreedy":
         act = learn(
@@ -215,7 +219,8 @@ def test():
                      is_training=False,
                      im_size=args.im_size,
                      T_steps=args.nb_epoch_steps,
-                     n_particles=args.num_particles
+                     n_particles=args.num_particles,
+                     ds_mode=args.ds_mode
                      )
 
     # timelimit_env = env
@@ -267,6 +272,7 @@ def test():
             #                            'targets': [env.targets[i].state for i in range(args.nb_targets)],
             #                            'belief_targets': [env.belief_targets[i].state for i in
             #                                               range(args.nb_targets)]})
+
             obs, terminated, truncated = env.reset(init_pose_list=given_init_pose, blocked=args.blocked), False, False
             test_init_pose.append({'agent': env.agent.state,
                                    'targets': [env.targets[i].state for i in range(args.nb_targets)],
@@ -278,17 +284,20 @@ def test():
                 # if seed == args.seed:
                 #     if args.render:
                 #         env.render(log_dir=test_directory_path)
+
+                action, q_vals = act(obs, stochastic=False, ret_q_vals=True)
                 if args.render:
-                    env.render(log_dir=test_directory_path)
+                    env.render(log_dir=test_directory_path, q_vals=q_vals)
                 # if args.ros_log:
                 #     ros_log.log(env)
-                action,q_vals = act(obs, stochastic=False, ret_q_vals=True)
+
                 next_obs, rew, terminated, truncated, info = env.step(action)
                 obs = next_obs
                 episode_rew += rew
                 step_q_vals.append(q_vals)
                 nlogdetcov += info['mean_nlogdetcov'] if info['mean_nlogdetcov'] else 0
-            plot_q_values_heatmap(step_q_vals, test_directory_path +str(ep)+ "_q values.pdf", action_labels=np.round(list(env.action_map.values()), 2))
+            plot_q_values_heatmap(step_q_vals, test_directory_path + str(ep) + "_q values.pdf",
+                                  action_labels=np.round(list(env.action_map.values()), 2))
             np.savetxt(test_directory_path + "q_vals.csv", np.array(step_q_vals), delimiter=',')
             episode_discovery_rate_dist.append(np.mean([dr / args.nb_epoch_steps for dr in env.discover_cnt]))
             episode_agent_target_dist.append(np.mean(env.agent_target_dist, axis=0))
@@ -324,7 +333,7 @@ def test():
 
 if __name__ == '__main__':
     if args.mode == 'train':
-        save_dir = os.path.join(args.log_dir, '_'.join([args.env, datetime.datetime.now().strftime("%m%d%H%M")]))
+        save_dir = os.path.join(args.log_dir, '_'.join([args.env, datetime.datetime.now().strftime("%m%d%H%M%S")]))
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         else:

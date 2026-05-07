@@ -3,3 +3,4 @@
 *.pkl
 *.zip
 ttenv/dqn/experiments/*
+node_modules
